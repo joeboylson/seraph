@@ -458,3 +458,32 @@ test("running sessions are grouped by computer, online ones first", async ({ pag
     await db.from("controllers").delete().eq("id", "box-a")
   }
 })
+
+test("a menu without numbers (the folder-trust question) can be answered", async ({ page }) => {
+  await page.goto(`/#/s/${session.id}`)
+  await expectCommand(session.id, "replay")
+  // Lines that merely start with ❯, without Claude's "Enter to confirm" footer, aren't a menu.
+  await sendScreen(session.id, "\x1b[2J\x1b[H❯ first thought\n  second thought\n")
+  await page.waitForTimeout(1500)
+  await expect(page.getByTestId("prompt-card")).toHaveCount(0)
+
+  await sendScreen(
+    session.id,
+    [
+      "\x1b[2J\x1b[H Accessing workspace:",
+      "",
+      " Quick safety check: Is this a project you created or one you trust?",
+      "",
+      " ❯ No, exit",
+      "   Yes, I trust this folder",
+      "",
+      " Enter to confirm · Esc to cancel",
+    ].join("\n"),
+  )
+  const card = page.getByTestId("prompt-card")
+  await expect(card.getByTestId("prompt-choice")).toHaveCount(2)
+  const yes = card.getByRole("button", { name: /Yes, I trust this folder/ })
+  await expect(yes).toBeEnabled()
+  await yes.click()
+  await expectCommand(session.id, "keys", (p) => JSON.stringify(p.keys) === '["Down","Enter"]')
+})

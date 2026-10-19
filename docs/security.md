@@ -59,7 +59,8 @@ signature: the first member's email, or the `push_contact` setting.
   well-known local keys and the database password `postgres`. `seraph setup
   --local` binds its ports to 127.0.0.1 and `seraph doctor` checks it stays
   that way; see [Supabase](supabase.md#option-1-local-in-docker).
-  `seraph tailscale` is fine: your tailnet is private.
+  It's only reachable from this computer, which is also why the hosted
+  setup needs a hosted project.
 - **Deleted rows' ids:** Supabase's Realtime doesn't apply row rules to
   delete events, so anyone connected with the publishable key can see the
   id of a row when it's deleted (a session's id, a message number). No

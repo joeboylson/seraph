@@ -7,10 +7,11 @@ broken. `seraph logs` shows what the controller and wrappers have been doing.
 The controller isn't running, or can't reach Supabase. Run `seraph start`,
 then `seraph doctor`. To keep it running across logins, `seraph service install`.
 
-**The page says it can't reach Supabase.**
-On another device, a local Supabase at `127.0.0.1` isn't reachable. Run
-`seraph tailscale`, or set `seraph setup --browser-url`. See
-[remote access](remote-access.md).
+**The page says it has no Supabase settings.**
+It was built without `VITE_SUPABASE_URL` and `VITE_SUPABASE_KEY`. Add them
+where it's built (e.g. Vercel's project settings) and deploy again. A page
+for a local Supabase only works on that same computer. See
+[the page](remote-access.md).
 
 **Everything is slow, or the logs say "timed out".**
 Usually Docker is short on memory (a local Supabase needs about 1 GB).

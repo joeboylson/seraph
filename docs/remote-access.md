@@ -1,43 +1,21 @@
-# Reaching the page from your phone
+# The page
 
-The controller serves the page on `http://127.0.0.1:8787`, which only this
-machine can open. To use it from another device, the page and Supabase both
-need to be reachable from there.
+The page is a static site in `web/`, hosted on its own (Vercel here, at
+https://seraph-omega-ten.vercel.app). It talks only to Supabase, and the
+controller on each computer talks only to Supabase, so the host never needs
+to reach your computers. Every device signs in once with your email.
 
-## Tailscale (recommended)
+## Deploying it
 
-With [Tailscale](https://tailscale.com) on this machine and your phone:
+On [Vercel](https://vercel.com), with the CLI logged in (`vercel login`):
 
 ```sh
-seraph tailscale
+cd web
+vercel deploy --prod
 ```
 
-This serves the page at `https://<machine>.<tailnet>.ts.net:8446`, private
-to your tailnet, with HTTPS (which browser notifications need). If you use
-a local Supabase, seraph also serves it on port 8447 and tells the page to use
-that address when it's opened from another device. A hosted Supabase needs
-no extra step.
-
-Pick other ports with `--web-port` and `--api-port`. Undo with
-`seraph tailscale --off`.
-
-## Other options
-
-Any way of reaching port 8787 works: an SSH tunnel
-(`ssh -L 8787:127.0.0.1:8787 your-mac`), a VPN, or a reverse proxy you
-already run. If Supabase is local, the page also needs to reach it. Set
-`seraph setup --browser-url <address the other device can use>`.
-
-Each device signs in once with a code sent to your email (see
-[Security](../README.md#security)). The data is locked to signed-in members,
-but keep the page private anyway: whoever signs in can run commands on your
-machine through Claude.
-
-## Hosting the page somewhere else (e.g. Vercel)
-
-The page is a static site in `web/dist`, so any static host can serve it.
-It needs a hosted Supabase project (the browser has to reach it), and
-three build settings, since there's no controller to ask:
+The project needs three settings (Vercel → Settings → Environment
+Variables), since they're built into the page:
 
 | Setting | Value |
 | --- | --- |
@@ -45,7 +23,31 @@ three build settings, since there's no controller to ask:
 | `VITE_SUPABASE_KEY` | The publishable key (never the secret one) |
 | `VITE_VAPID_PUBLIC_KEY` | The "Push key" line from `seraph status`, for notifications |
 
-The controller still runs on your computer (`seraph start`) to start sessions.
-It only talks to Supabase, so the host never needs to reach your computer.
-Anyone can open the page's address, but only members can sign in; see
-[security](security.md).
+In Supabase, set **Authentication → URL Configuration** so the sign-in
+email's link comes back to the page: Site URL = the page's address, and the
+same address under Redirect URLs. Then tell seraph where the page is, for
+`seraph open`:
+
+```sh
+seraph setup --page-url https://<your page>
+```
+
+Any static host works the same way: build with `npx vite build` and those
+three settings, and serve `web/dist`.
+
+Anyone can open the page's address, but only members can sign in, and the
+data is locked to members; see [security](security.md). Whoever signs in can
+run commands on your computers through Claude, so only add accounts you trust.
+
+## Installing on your other computers
+
+With [Tailscale](https://tailscale.com), one computer can hand seraph to the
+others:
+
+```sh
+seraph tailscale
+```
+
+prints the line to run on each other computer of the same kind
+(`curl -fsSL https://<machine>.<tailnet>.ts.net:8446/install | sh`), which
+installs or updates seraph from this one. Undo with `seraph tailscale --off`.

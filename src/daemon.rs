@@ -1,7 +1,6 @@
 //! `seraph daemon`: starts sessions for the web page and serves the page.
 
 use crate::config;
-use crate::embedded::Page;
 use crate::push;
 use crate::supa::{api, finish_command, insert, log, now, quote, select_rows, update};
 use crate::util::{detach, process_alive};
@@ -163,40 +162,9 @@ fn readable(e: &anyhow::Error) -> String {
     e.to_string()
 }
 
-// ---- the page ---------------------------------------------------------------
+// ---- installing on other devices -------------------------------------------
 
 const LOOPBACK: [&str; 4] = ["127.0.0.1", "localhost", "::1", "[::1]"];
-
-/// What the web page needs to reach Supabase. Served as /config.json.
-///
-/// Opened on this machine, the page can use the same address seraph does.
-/// Opened from elsewhere (e.g. through Tailscale), it needs the address
-/// set for browsers, if there is one.
-fn browser_settings(page_host: &str, vapid: &Option<String>) -> Result<Value> {
-    let s = config::require()?;
-    let host = page_host.rsplit_once(':').map_or(page_host, |(h, _)| h);
-    let url = if LOOPBACK.contains(&host) { s.url.clone() } else { s.browser_url.clone().unwrap_or(s.url.clone()) };
-    Ok(json!({ "supabaseUrl": url, "supabaseKey": s.key, "vapidPublicKey": vapid }))
-}
-
-fn content_type(path: &Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
-        "html" => "text/html; charset=utf-8",
-        "js" | "mjs" => "text/javascript",
-        "css" => "text/css",
-        "json" => "application/json",
-        "svg" => "image/svg+xml",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "webp" => "image/webp",
-        "ico" => "image/x-icon",
-        "woff" => "font/woff",
-        "woff2" => "font/woff2",
-        "txt" => "text/plain; charset=utf-8",
-        "map" => "application/json",
-        _ => "application/octet-stream",
-    }
-}
 
 fn header(name: &str, value: &str) -> tiny_http::Header {
     tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()).expect("valid header")
@@ -252,7 +220,7 @@ fi
     )
 }
 
-fn serve(request: tiny_http::Request, vapid: &Option<String>) {
+fn serve(request: tiny_http::Request) {
     let url_path = request.url().split('?').next().unwrap_or("/").to_string();
     let host = request.headers().iter().find(|h| h.field.equiv("Host")).map(|h| h.value.to_string()).unwrap_or_default();
     if url_path == "/install" {
@@ -274,29 +242,9 @@ fn serve(request: tiny_http::Request, vapid: &Option<String>) {
         }
         return;
     }
-    if url_path == "/config.json" {
-        let body = browser_settings(&host, vapid).map(|v| v.to_string()).unwrap_or_else(|e| json!({ "error": e.to_string() }).to_string());
-        let res = tiny_http::Response::from_string(body)
-            .with_header(header("Content-Type", "application/json"))
-            .with_header(header("Cache-Control", "no-store"));
-        let _ = request.respond(res);
-        return;
-    }
-    // Single-page app: unknown paths get index.html. Lookups only ever hit
-    // the files built into the binary, so no path can reach the disk.
-    let name = url_path.trim_start_matches('/');
-    let (name, file) = match Page::get(name) {
-        Some(f) if !name.is_empty() => (name, f),
-        _ => match Page::get("index.html") {
-            Some(f) => ("index.html", f),
-            None => {
-                let _ = request.respond(tiny_http::Response::from_string("This build has no page; build it with ./install.sh.").with_status_code(404));
-                return;
-            }
-        },
-    };
-    let res = tiny_http::Response::from_data(file.data.into_owned()).with_header(header("Content-Type", content_type(Path::new(name))));
-    let _ = request.respond(res);
+    // The page itself is hosted elsewhere (e.g. Vercel); point there.
+    let page = config::load().page_url.unwrap_or_else(|| "not set: run `seraph setup --page-url <address>`".into());
+    let _ = request.respond(tiny_http::Response::from_string(format!("This is seraph's controller on {}. The page is at {page}\n", config::machine())));
 }
 
 // ---- upkeep -----------------------------------------------------------------
@@ -394,11 +342,10 @@ fn run_requests(controller_id: &str) -> Result<()> {
 pub fn cmd_daemon() -> Result<i32> {
     let s = config::require()?;
     let controller_id = config::machine();
-    // Before serving the page, which hands out the key's public half.
+    // Every computer signs pushes with the project's shared key.
     if let Err(e) = push::sync_key() {
         log(format!("daemon push key: {e}"));
     }
-    let vapid = push::public_key().map_err(|e| log(format!("push: no VAPID key ({e})"))).ok();
 
     let server = tiny_http::Server::http(("127.0.0.1", s.web_port)).map_err(|e| {
         anyhow!(
@@ -408,10 +355,10 @@ pub fn cmd_daemon() -> Result<i32> {
     })?;
     let server = Arc::new(server);
     for _ in 0..4 {
-        let (server, vapid) = (server.clone(), vapid.clone());
+        let server = server.clone();
         thread::spawn(move || {
             for request in server.incoming_requests() {
-                serve(request, &vapid);
+                serve(request);
             }
         });
     }
@@ -421,7 +368,7 @@ pub fn cmd_daemon() -> Result<i32> {
     let stop = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::consts::SIGTERM, stop.clone())?;
     signal_hook::flag::register(signal_hook::consts::SIGINT, stop.clone())?;
-    println!("seraph daemon: page on http://127.0.0.1:{}, Supabase at {}", s.web_port, s.url);
+    println!("seraph daemon: install line on http://127.0.0.1:{}/install, Supabase at {}", s.web_port, s.url);
 
     let (mut last_beat, mut last_purge, mut last_watch) = (None, None, None);
     let mut watcher = push::Watcher::default();

@@ -15,7 +15,7 @@ mod util;
 mod wrapper;
 
 use anyhow::{anyhow, bail, Result};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::process::Command;
 use supa::{quote, select_rows};
 use util::which;
@@ -41,7 +41,7 @@ Look after it
   seraph stop | restart       stop or restart the controller
   seraph logs [-f]            controller logs
   seraph service install      start the controller when you log in (uninstall to undo)
-  seraph tailscale            reach the page from your other devices
+  seraph tailscale            let other devices install from this one
   seraph user list | remove   who can sign in to the page
   seraph user code <email>    print a sign-in code, instead of emailing one
   seraph db push              install or update the database tables
@@ -140,7 +140,9 @@ fn cmd_uninstall(purge: bool) -> Result<i32> {
 // ---- open / tailscale -------------------------------------------------------
 
 fn cmd_open() -> Result<i32> {
-    let url = service::page_url();
+    let Some(url) = config::load().page_url else {
+        bail!("No page address saved. Run `seraph setup --page-url <where the page is hosted>`.");
+    };
     if service::daemon_pid().is_none() {
         println!("The controller isn't running; starting it…");
         if service::cmd_start()? != 0 {
@@ -155,38 +157,25 @@ fn cmd_open() -> Result<i32> {
     Ok(0)
 }
 
-/// Serve the page (and a local Supabase) on this machine's Tailscale address.
-fn cmd_tailscale(web_port: u16, api_port: u16, off: bool) -> Result<i32> {
+/// Put this computer's install line on its Tailscale address, so other
+/// devices can install or update from it.
+fn cmd_tailscale(web_port: u16, off: bool) -> Result<i32> {
     if which("tailscale").is_none() {
         bail!("Tailscale isn't installed.");
     }
     let s = config::require()?;
-    let serve = |port: u16, target: &str| -> Result<()> {
-        let args = ["serve".to_string(), "--bg".into(), format!("--https={port}"), if off { "off".into() } else { target.to_string() }];
-        let out = Command::new("tailscale").args(&args).output()?;
-        if !out.status.success() {
-            bail!("`tailscale {}` failed: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim());
-        }
-        Ok(())
-    };
+    let target = if off { "off".to_string() } else { format!("http://127.0.0.1:{}", s.web_port) };
+    let args = ["serve".to_string(), "--bg".into(), format!("--https={web_port}"), target];
+    let out = Command::new("tailscale").args(&args).output()?;
+    if !out.status.success() {
+        bail!("`tailscale {}` failed: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim());
+    }
     let status: Value = serde_json::from_slice(&Command::new("tailscale").args(["status", "--json"]).output()?.stdout)?;
     let host = status["Self"]["DNSName"].as_str().unwrap_or("").trim_end_matches('.').to_string();
-
-    serve(web_port, &format!("http://127.0.0.1:{}", s.web_port))?;
-    if setup::is_local(&s.url) {
-        let port = url::Url::parse(&s.url)?.port_or_known_default().unwrap_or(80);
-        serve(api_port, &format!("http://127.0.0.1:{port}"))?;
-        // The page runs on other devices, so it needs Supabase's Tailscale address too.
-        if off {
-            config::remove(&["browser_supabase_url"])?;
-        } else {
-            config::save(&[("browser_supabase_url", Some(json!(format!("https://{host}:{api_port}"))))])?;
-        }
-    }
     if off {
         println!("Stopped serving on Tailscale.");
     } else {
-        println!("On your tailnet: https://{host}:{web_port}");
+        println!("Other devices install or update with:\n  curl -fsSL https://{host}:{web_port}/install | sh");
     }
     Ok(0)
 }
@@ -326,7 +315,7 @@ fn dispatch(argv: &[String]) -> Result<i32> {
                 key: args.value(&["--key"])?,
                 secret_key: args.value(&["--secret-key"])?,
                 db_url: args.value(&["--db-url"])?,
-                browser_url: args.value(&["--browser-url"])?,
+                page_url: args.value(&["--page-url"])?,
                 web_port: args.number(&["--web-port"])?,
                 claude_bin: args.value(&["--claude-bin"])?,
             };
@@ -358,10 +347,9 @@ fn dispatch(argv: &[String]) -> Result<i32> {
         },
         "tailscale" => {
             let web_port = args.number(&["--web-port"])?.unwrap_or(8446);
-            let api_port = args.number(&["--api-port"])?.unwrap_or(8447);
             let off = args.flag(&["--off"]);
             args.positionals()?;
-            cmd_tailscale(web_port, api_port, off)
+            cmd_tailscale(web_port, off)
         }
         "user" => match args.positionals()?.as_slice() {
             [action] => users::cmd_user(action, None),

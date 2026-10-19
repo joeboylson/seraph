@@ -25,12 +25,15 @@ or a Supabase project. Building from the repo also needs
 
 ```sh
 git clone https://github.com/joeboylson/seraph.git && cd seraph
-./install.sh              # builds seraph, page included, into ~/.local/bin
+./install.sh              # builds seraph into ~/.local/bin
 seraph setup              # connect to Supabase: local Docker, or your own project
 seraph user add <email>   # let yourself sign in to the page
 seraph start              # run the controller in the background
-seraph open               # open the page
 ```
+
+Then deploy the page (`web/`) to Vercel or any static host, and tell seraph
+where it is with `seraph setup --page-url <address>`; see
+[the page](docs/remote-access.md). `seraph open` opens it.
 
 Then, in any project:
 
@@ -56,7 +59,7 @@ back), and if seraph isn't set up it runs plain `claude`. So it's safe to
 | Pick one back up | `seraph resume`, or `seraph resume <part of its name or folder>` |
 | Show an already-running Claude on the page (read-only) | `!seraph link` inside it |
 | Check everything is running | `seraph status`, or `seraph doctor` for detail |
-| Reach the page from other devices | `seraph tailscale`. See [remote access](docs/remote-access.md) |
+| Install seraph on your other computers | `seraph tailscale`. See [the page](docs/remote-access.md) |
 | Start the controller at login | `seraph service install` |
 | Read the logs | `seraph logs`, or `seraph logs -f` to follow |
 
@@ -96,7 +99,7 @@ seraph setup --url https://abcd.supabase.co --key sb_publishable_… --secret-ke
 Settings live in `~/.seraph/config.json`. Every one can be overridden with an
 environment variable (`SERAPH_SUPABASE_URL`, `SERAPH_SUPABASE_KEY`,
 `SERAPH_SUPABASE_SECRET_KEY`, `SERAPH_WEB_PORT`,
-`SERAPH_CLAUDE_BIN`, `SERAPH_BROWSER_SUPABASE_URL`), and `SERAPH_HOME` moves the whole
+`SERAPH_CLAUDE_BIN`, `SERAPH_PAGE_URL`), and `SERAPH_HOME` moves the whole
 folder. Details in [docs/supabase.md](docs/supabase.md).
 
 ## Installing and updating
@@ -125,9 +128,9 @@ one is behind. If an update adds tables or columns, run `seraph db push`
 Every computer that runs seraph against the same Supabase project shows up on
 the one page. Its sessions are listed together, and **New session** asks
 which computer to start on. On each extra computer, run `seraph setup` with
-the same project URL and keys (`--url`, `--key`, `--secret-key`). If the
-project is a local Supabase on another machine, use its Tailscale address
-(`https://<machine>.<tailnet>.ts.net:8447`). Then run `seraph start`.
+the same project URL and keys (`--url`, `--key`, `--secret-key`), then
+`seraph start`. This needs a hosted Supabase project, which every computer
+can reach.
 
 - Computers are told apart by hostname. Give one another name with
   `SERAPH_MACHINE=name` or `"machine"` in `~/.seraph/config.json`. Each computer

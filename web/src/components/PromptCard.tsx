@@ -58,10 +58,10 @@ export function PromptCard({
     }
   }, [state, sentAt, mirror])
 
-  const press = (key: string) => {
+  const press = (keys: string[]) => {
     setState("sent")
     setSentAt(Date.now())
-    sendKeys(sessionId, [key]).catch(() => setState("retry"))
+    sendKeys(sessionId, keys).catch(() => setState("retry"))
   }
   const disabled = state === "settling" || state === "sent"
   return (
@@ -89,7 +89,7 @@ export function PromptCard({
             key={c.key}
             variant={c.key === "1" ? "default" : "outline"}
             className="h-auto justify-start rounded-lg px-s4 py-s3 text-left whitespace-normal"
-            onClick={() => press(c.key)}
+            onClick={() => press(c.keys)}
             disabled={disabled}
             data-testid="prompt-choice"
           >
@@ -101,7 +101,7 @@ export function PromptCard({
           variant={prompt.choices.length ? "ghost" : "default"}
           className="w-fit rounded-full"
           disabled={disabled}
-          onClick={() => press("Escape")}
+          onClick={() => press(["Escape"])}
           data-testid="prompt-escape"
         >
           {prompt.choices.length ? "Cancel (Esc)" : "Close (Esc)"}

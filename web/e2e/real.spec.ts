@@ -14,15 +14,18 @@ async function sessionStatus(id: string) {
 }
 
 /**
- * Answer every menu Claude shows with its first choice ("Yes") until
- * `done` holds, the way a person approving from their phone would.
+ * Answer every menu Claude shows with "Yes" until `done` holds, the way a
+ * person approving from their phone would. Picks the option that starts with
+ * "Yes", not the first: the folder-trust question lists "No, exit" first.
  */
 async function approveUntil(page: Page, sessionId: string, done: () => Promise<boolean>, timeoutMs = 4 * 60_000) {
   const deadline = Date.now() + timeoutMs
   let approvals = 0
   while (Date.now() < deadline) {
     const card = page.getByTestId("prompt-card")
-    const choice = card.getByTestId("prompt-choice").first()
+    const choices = card.getByTestId("prompt-choice")
+    const yes = choices.filter({ hasText: /^\s*\d*\s*Yes/ }).first()
+    const choice = (await yes.count()) ? yes : choices.first()
     if ((await card.isVisible()) && (await choice.isEnabled())) {
       await choice.click()
       approvals++

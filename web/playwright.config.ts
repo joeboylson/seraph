@@ -4,15 +4,26 @@ import { seraphSettings } from "./e2e/settings"
 const storageState = "e2e/.auth/state.json"
 
 // Desktop Chrome crashes between tests on this Mac, so use Playwright's
-// headless shell. CSC_CHROME overrides the path.
+// headless shell. SERAPH_CHROME overrides the path.
 const executablePath =
-  process.env.CSC_CHROME ??
+  process.env.SERAPH_CHROME ??
   `${process.env.HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/chrome-headless-shell`
 
-// Runs against the page served by `csc daemon` (it serves web/dist).
-// `npm test` runs the fast UI suite; `npm run test:real` drives a real
-// Claude session end to end.
+// Builds the page with the settings in ~/.seraph/config.json and serves it
+// on 127.0.0.1:4173. `npm test` runs the fast UI suite; `npm run test:real`
+// drives a real Claude session end to end (needs `seraph start`).
+const supabase = seraphSettings()
+const pageUrl = "http://127.0.0.1:4173"
+
 export default defineConfig({
+  webServer: {
+    command: "npx vite build --logLevel error && npx vite preview --host 127.0.0.1 --port 4173 --strictPort",
+    url: pageUrl,
+    // Always a fresh build, so the tests never run against an old page.
+    reuseExistingServer: false,
+    timeout: 120_000,
+    env: { VITE_SUPABASE_URL: supabase.url, VITE_SUPABASE_KEY: supabase.key },
+  },
   testDir: "./e2e",
   timeout: 60_000,
   expect: { timeout: 20_000 },
@@ -21,7 +32,7 @@ export default defineConfig({
   retries: 0,
   reporter: [["list"]],
   use: {
-    baseURL: process.env.CSC_WEB_URL ?? seraphSettings().webUrl,
+    baseURL: process.env.SERAPH_PAGE_URL ?? pageUrl,
     launchOptions: { executablePath },
     trace: "retain-on-failure",
   },

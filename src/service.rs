@@ -26,8 +26,9 @@ pub fn service_installed() -> bool {
     plist_path().exists() || systemd_path().exists()
 }
 
+/// Where the page is hosted, for messages and `seraph open`.
 pub fn page_url() -> String {
-    format!("http://127.0.0.1:{}", config::load().web_port)
+    config::load().page_url.unwrap_or_else(|| "not set (seraph setup --page-url <address>)".into())
 }
 
 fn macos() -> bool {

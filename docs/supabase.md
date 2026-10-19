@@ -29,7 +29,8 @@ ports could read everything. Docker normally publishes a project's ports on
 every network interface (anyone on the same Wi-Fi), so `seraph setup --local`
 creates the stack's network first with ports bound to 127.0.0.1. `seraph doctor`
 checks this. If it ever flags it, run `supabase stop`, then `seraph setup
---local`. `seraph tailscale` still works: it reaches the stack through 127.0.0.1.
+--local`. A local stack is only reachable from this computer, so its page
+has to be opened here too (`npx vite` in `web/` with the local settings).
 
 Sign-in codes from a local stack aren't really emailed. They land in its
 test inbox at http://127.0.0.1:55424, and `seraph user code <email>` prints a
@@ -73,9 +74,8 @@ Then set up sign-in, in the dashboard under **Authentication**:
 - **Sign In / Providers**: turn off **Allow new users to sign up**. Leave
   the Email provider on. Accounts come from `seraph user add <email>`.
 - **URL Configuration**: add the page's addresses to Redirect URLs, e.g.
-  `http://127.0.0.1:8787/**` and your Tailscale one
-  (`https://<machine>.<tailnet>.ts.net:8446/**`). The sign-in email's link
-  comes back to the page and signs you in.
+  the page's address, and set it as the Site URL too. The sign-in email's
+  link comes back to the page and signs you in.
 - **Emails → Magic Link** (optional): to get a code in the email as well,
   paste in `supabase/templates/magic_link.html`. On the free plan this needs
   your own SMTP server first; without it the email has only the link, which
@@ -110,12 +110,12 @@ in the old project stay there.
 | `supabase_url` | What seraph and the hooks talk to |
 | `supabase_key` | The publishable or anon key, given to the page |
 | `supabase_secret_key` | The secret or service_role key, used by seraph and the hooks. Never sent to the page. |
-| `browser_supabase_url` | What the page uses when it's opened from another device, if different. `seraph tailscale` sets this for a local Supabase. |
-| `web_port` | Where the controller serves the page (default 8787) |
+| `page_url` | Where the page is hosted, for `seraph open` |
+| `web_port` | Where the controller serves the install line for other computers (default 8787) |
 | `claude_bin` | The Claude Code command (default `claude`) |
 
 Each can be overridden per shell with `SERAPH_SUPABASE_URL`,
-`SERAPH_SUPABASE_KEY`, `SERAPH_SUPABASE_SECRET_KEY`, `SERAPH_BROWSER_SUPABASE_URL`, `SERAPH_WEB_PORT` and
+`SERAPH_SUPABASE_KEY`, `SERAPH_SUPABASE_SECRET_KEY`, `SERAPH_PAGE_URL`, `SERAPH_WEB_PORT` and
 `SERAPH_CLAUDE_BIN`. `SERAPH_HOME` moves the folder, which is handy for running two
 setups side by side.
 

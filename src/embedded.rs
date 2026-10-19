@@ -1,16 +1,11 @@
-//! The page and the Supabase project files, built into the binary, so a
-//! device needs nothing but `seraph` itself.
+//! The Supabase project files, built into the binary, so a device needs
+//! nothing but `seraph` itself.
 
 use crate::config;
 use anyhow::Result;
 use rust_embed::RustEmbed;
 use std::fs;
 use std::path::PathBuf;
-
-/// The built page (web/dist). `./install.sh` builds it before the binary.
-#[derive(RustEmbed)]
-#[folder = "web/dist"]
-pub struct Page;
 
 /// What `supabase` needs to run the local stack and apply the schema.
 /// Only these files: the folder also holds the CLI's own state and secrets.

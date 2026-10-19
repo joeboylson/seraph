@@ -4,9 +4,8 @@
 //!     supabase_key          the project's publishable (anon) key, given to the page
 //!     supabase_secret_key   the project's secret (service role) key, used by seraph
 //!                           and the hooks; never sent to the page
-//!     browser_supabase_url  what the web page uses, if different (e.g. a
-//!                           Tailscale address for a local Supabase)
-//!     web_port              where `seraph daemon` serves the page (8787)
+//!     page_url              where the page is hosted (e.g. on Vercel)
+//!     web_port              where `seraph daemon` serves the install line (8787)
 //!     claude_bin            the Claude Code command (claude)
 //!     machine               this computer's name on the page (its hostname);
 //!                           each computer sharing a project needs its own
@@ -26,7 +25,7 @@ const KEYS: [&str; 8] = [
     "supabase_url",
     "supabase_key",
     "supabase_secret_key",
-    "browser_supabase_url",
+    "page_url",
     "web_port",
     "claude_bin",
     "push_contact",
@@ -38,7 +37,7 @@ pub struct Settings {
     pub supabase_url: Option<String>,
     pub supabase_key: Option<String>,
     pub supabase_secret_key: Option<String>,
-    pub browser_supabase_url: Option<String>,
+    pub page_url: Option<String>,
     pub web_port: u16,
     pub claude_bin: String,
     pub push_contact: Option<String>,
@@ -49,9 +48,7 @@ pub struct Settings {
 #[derive(Clone, Debug)]
 pub struct Ready {
     pub url: String,
-    pub key: String,
     pub secret: String,
-    pub browser_url: Option<String>,
     pub web_port: u16,
     pub claude_bin: String,
 }
@@ -140,7 +137,7 @@ pub fn load() -> Settings {
         supabase_url: get("supabase_url"),
         supabase_key: get("supabase_key"),
         supabase_secret_key: get("supabase_secret_key"),
-        browser_supabase_url: get("browser_supabase_url"),
+        page_url: get("page_url"),
         web_port: get("web_port").and_then(|p| p.parse().ok()).unwrap_or(8787),
         claude_bin: get("claude_bin").unwrap_or_else(|| "claude".into()),
         push_contact: get("push_contact"),
@@ -158,15 +155,6 @@ pub fn save(changes: &[(&str, Option<Value>)]) -> Result<()> {
         if let Some(v) = v {
             saved.insert((*k).to_string(), v.clone());
         }
-    }
-    write_saved(&saved)
-}
-
-/// Remove settings entirely (e.g. `seraph tailscale --off`).
-pub fn remove(keys: &[&str]) -> Result<()> {
-    let mut saved = saved();
-    for k in keys {
-        saved.remove(*k);
     }
     write_saved(&saved)
 }
@@ -208,7 +196,7 @@ pub fn hostname() -> String {
 /// The settings, or an error telling the person to run `seraph setup`.
 pub fn require() -> Result<Ready> {
     let s = load();
-    let (Some(url), Some(key)) = (s.supabase_url, s.supabase_key) else {
+    let (Some(url), Some(_key)) = (s.supabase_url, s.supabase_key) else {
         bail!("seraph isn't connected to Supabase yet. Run `seraph setup`.");
     };
     let Some(secret) = s.supabase_secret_key else {
@@ -216,9 +204,7 @@ pub fn require() -> Result<Ready> {
     };
     Ok(Ready {
         url,
-        key,
         secret,
-        browser_url: s.browser_supabase_url,
         web_port: s.web_port,
         claude_bin: s.claude_bin,
     })

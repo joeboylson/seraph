@@ -215,13 +215,20 @@ pub struct SetupArgs {
     pub key: Option<String>,
     pub secret_key: Option<String>,
     pub db_url: Option<String>,
-    pub browser_url: Option<String>,
+    pub page_url: Option<String>,
     pub web_port: Option<u16>,
     pub claude_bin: Option<String>,
 }
 
 pub fn cmd_setup(args: SetupArgs) -> Result<i32> {
     let current = config::load();
+    // Just a new page address: the Supabase settings stay as they are.
+    let only_page = !args.local && args.url.is_none() && args.key.is_none() && args.secret_key.is_none();
+    if let (true, Some(page)) = (only_page, &args.page_url) {
+        config::save(&[("page_url", Some(Value::from(page.trim_end_matches('/'))))])?;
+        println!("Saved: the page is at {}", page.trim_end_matches('/'));
+        return Ok(0);
+    }
     let (mut url, mut key, mut secret, mut db_url) = (args.url, args.key, args.secret_key, args.db_url);
 
     if args.local {
@@ -267,16 +274,11 @@ pub fn cmd_setup(args: SetupArgs) -> Result<i32> {
         bail!("Supabase rejected the secret key ({status}). Use the project's secret or service_role key.");
     }
 
-    if !is_local(&url) && args.browser_url.is_none() {
-        // A hosted project is reachable from anywhere; a Tailscale address
-        // saved for a local one would send the page to the wrong place.
-        config::remove(&["browser_supabase_url"])?;
-    }
     config::save(&[
         ("supabase_url", Some(json!(url))),
         ("supabase_key", Some(json!(key))),
         ("supabase_secret_key", Some(json!(secret))),
-        ("browser_supabase_url", args.browser_url.map(Value::from)),
+        ("page_url", args.page_url.map(|u| Value::from(u.trim_end_matches('/')))),
         ("web_port", args.web_port.map(Value::from)),
         ("claude_bin", args.claude_bin.map(Value::from)),
     ])?;
@@ -347,7 +349,6 @@ fn checks() -> Checks {
         format!("seraph on PATH: {}", on_path.map(|p| p.display().to_string()).unwrap_or_else(|| "no".into())),
         "Run ./install.sh in the repo, or the install line from the page's computer.",
     );
-    c.add(embedded::Page::get("index.html").is_some(), "Page built in", "Rebuild with ./install.sh in the repo (it builds the page first).");
 
     let (Some(url), Some(key)) = (s.supabase_url.clone(), s.supabase_key.clone()) else {
         c.add(false, format!("Settings in {}", config::config_path().display()), "Run `seraph setup`.");
@@ -378,8 +379,14 @@ fn checks() -> Checks {
     let ping = json!({ "messages": [{ "topic": "csc:doctor", "event": "ping", "payload": {}, "private": true }] });
     let (status, _) = probe(&url, &secret, "/realtime/v1/api/broadcast", "POST", Some(&ping));
     c.add(status != 0 && status < 300, format!("Realtime broadcast ({status})"), "Realtime must be enabled for the project.");
-    if let Some(browser) = &s.browser_supabase_url {
-        c.add(true, format!("Page reaches Supabase at {browser}"), "");
+    match &s.page_url {
+        Some(page) => {
+            let ok = crate::supa::agent(15).get(page).call().is_ok();
+            c.add(ok, format!("Page at {page}"), "Is it deployed? See docs/remote-access.md.");
+        }
+        None => {
+            c.add(false, "No page address saved", "Run `seraph setup --page-url <where the page is hosted>`.");
+        }
     }
     if is_local(&url) {
         let exposed = exposed_ports();

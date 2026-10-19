@@ -18,15 +18,15 @@ database trigger turns those into the session's status: `starting`, `idle`,
 `working`, `waiting` (on you) or `ended`. Your own Claude settings and hooks
 are untouched.
 
-**`seraph daemon`**, the controller, runs in the background. It serves the
-page, starts sessions the page asks for (the same wrapper, with no terminal
+**`seraph daemon`**, the controller, runs in the background. It starts
+sessions the page asks for (the same wrapper, with no terminal
 attached), lists folders for the folder picker, checks in every 10 seconds
 so the page knows it's online, and marks sessions ended if their process
 dies.
 
 **The page** (`web/`, Vite + React + shadcn) reads and writes Supabase
-directly. It gets the Supabase address from the controller (`/config.json`),
-so the same build works with any project.
+directly, with the project's address and publishable key built in. It's
+hosted on its own (e.g. Vercel); see [the page](remote-access.md).
 
 ## Answering Claude
 

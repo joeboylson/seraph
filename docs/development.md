@@ -39,7 +39,7 @@ keep the binary they started with.
 ```sh
 cd web
 npm install
-npx vite build      # then ./install.sh: the controller serves the page built into it
+npx vite build      # needs VITE_SUPABASE_URL and VITE_SUPABASE_KEY; deploy with `vercel deploy --prod`
 ```
 
 For hot reload, `npx vite` with `VITE_SUPABASE_URL` and `VITE_SUPABASE_KEY`

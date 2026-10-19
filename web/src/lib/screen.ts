@@ -1,4 +1,5 @@
-export type Choice = { key: string; label: string; selected: boolean }
+/** `key` labels the button; `keys` are what's typed to pick it. */
+export type Choice = { key: string; label: string; selected: boolean; keys: string[] }
 export type Prompt = {
   title: string
   choices: Choice[]
@@ -20,7 +21,7 @@ export function readPrompt(lines: string[]): Prompt | null {
   while (end >= 0 && !lines[end].trim()) end--
   const bottom = lines.slice(Math.max(0, end - 30), end + 1)
 
-  const panel = readPanel(bottom)
+  const panel = readCursorMenu(bottom) ?? readPanel(bottom)
 
   // The menu must sit near the bottom: only a short footer may follow it.
   let last = -1
@@ -37,7 +38,7 @@ export function readPrompt(lines: string[]): Prompt | null {
   for (let i = last; i >= 0; i--) {
     const m = bottom[i].match(CHOICE)
     if (m) {
-      choices.unshift({ key: m[2], label: m[3], selected: Boolean(m[1]) })
+      choices.unshift({ key: m[2], label: m[3], selected: Boolean(m[1]), keys: [m[2]] })
       first = i
     } else if (bottom[i].trim() && !/^\s{3,}\S/.test(bottom[i])) {
       break // a wrapped choice label is indented; anything else ends the menu
@@ -56,6 +57,46 @@ export function readPrompt(lines: string[]): Prompt | null {
   }
   const hint = bottom.slice(last + 1).map((l) => l.trim()).find((l) => l && !RULE.test(l)) ?? null
   return { title, choices, hint }
+}
+
+const CURSOR = /^(\s*)(❯|›)\s+(\S.*?)\s*$/
+// Footers under menus picked with the arrow keys and Enter.
+const MENU_FOOTER = /enter to (confirm|select)|to navigate|↑\s*\/?\s*↓/i
+
+/**
+ * A menu without numbers, like the folder-trust question: a ❯ marks the
+ * current option and Enter picks it. Each choice moves there, then presses
+ * Enter. Only counts with Claude's "Enter to confirm" footer just below, so
+ * a reply that happens to start with ❯ isn't mistaken for one.
+ */
+function readCursorMenu(bottom: string[]): Prompt | null {
+  const footer = bottom.findLastIndex((l) => MENU_FOOTER.test(l))
+  if (footer === -1 || bottom.length - footer > 3) return null
+  const cursor = bottom.slice(0, footer).findLastIndex((l) => CURSOR.test(l))
+  if (cursor === -1 || footer - cursor > 12) return null
+  const column = bottom[cursor].indexOf(bottom[cursor].match(CURSOR)![3])
+  // An option's text starts in the same column as the selected one's.
+  const isOption = (l: string) => l.length > column && l[column] !== " " && l.slice(0, column).replace(/[❯›]/, "").trim() === ""
+  let first = cursor
+  while (first > 0 && isOption(bottom[first - 1])) first--
+  let last = cursor
+  while (last + 1 < footer && isOption(bottom[last + 1])) last++
+  if (last === first) return null
+
+  const selected = cursor - first
+  const choices: Choice[] = bottom.slice(first, last + 1).map((line, i) => {
+    const moves = Array(Math.abs(i - selected)).fill(i > selected ? "Down" : "Up")
+    return { key: String(i + 1), label: line.slice(column).trim(), selected: i === selected, keys: [...moves, "Enter"] }
+  })
+  let title = ""
+  for (let i = first - 1; i >= 0; i--) {
+    const text = bottom[i].trim()
+    if (text && !RULE.test(text)) {
+      title = text
+      break
+    }
+  }
+  return { title, choices, hint: bottom[footer].trim() }
 }
 
 // Footers Claude shows under panels that wait for Esc.
