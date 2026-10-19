@@ -434,28 +434,49 @@ test("two devices on one session see each other's changes live", async ({ page, 
   }
 })
 
-test("running sessions are grouped by computer, online ones first", async ({ page }) => {
+test("the sidebar lists devices, online first, and opens one to show its sessions by name", async ({ page }) => {
   await db.from("controllers").upsert({ id: "box-a", hostname: "box-a", home: "/home/a", last_seen: new Date().toISOString() })
   const onA = await fakeSession({ name: "on box a", hostname: "box-a" })
   const onB = await fakeSession({ name: "on box b", hostname: "box-b" })
   try {
     await page.goto(`/#/s/${onA.id}`)
     const list = page.getByRole("complementary")
-    const groups = list.getByTestId("machine-group")
-    const a = groups.filter({ hasText: "box-a" })
-    const b = groups.filter({ hasText: "box-b" })
-    await expect(a).toContainText("on box a")
-    await expect(b).toContainText("on box b")
-    await expect(a).not.toContainText("on box b")
-    await expect(a.getByTitle("Online")).toBeVisible()
-    await expect(b.getByTitle("Offline")).toBeVisible()
+    // The open session's device is shown first, with names only and no folders.
+    await expect(list.getByTestId("device-name")).toHaveText("box-a")
+    await expect(list.getByTestId("session-item")).toHaveText(/on box a/)
+    await expect(list).not.toContainText("on box b")
+    await expect(list).not.toContainText("/tmp/seraph-test")
+
+    await list.getByTestId("devices-back").click()
+    const devices = list.getByTestId("device-item")
+    await expect(devices.filter({ hasText: "box-a" }).getByTitle("Online")).toBeAttached()
+    await expect(devices.filter({ hasText: "box-b" }).getByTitle("Offline")).toBeAttached()
     // box-a is online, so it's listed before box-b.
-    const names = await groups.locator("p").allTextContents()
-    expect(names.indexOf("box-a")).toBeLessThan(names.indexOf("box-b"))
+    const names = await devices.allTextContents()
+    expect(names.findIndex((n) => n.includes("box-a"))).toBeLessThan(names.findIndex((n) => n.includes("box-b")))
+
+    await devices.filter({ hasText: "box-b" }).click()
+    await expect(list.getByTestId("session-item")).toHaveText(/on box b/)
+    await list.getByTestId("session-item").click()
+    await expect(page.getByTestId("session-title")).toHaveText("on box b")
   } finally {
     await removeSession(onA.id)
     await removeSession(onB.id)
     await db.from("controllers").delete().eq("id", "box-a")
+  }
+})
+
+test("ended sessions are folded away until opened", async ({ page }) => {
+  const old = await fakeSession({ name: "an old one", status: "ended", ended_at: new Date().toISOString() })
+  try {
+    await page.goto(`/#/s/${session.id}`)
+    const list = page.getByRole("complementary")
+    await expect(list.getByTestId("ended-toggle")).toContainText("Ended (")
+    await expect(list.getByText("an old one")).toHaveCount(0)
+    await list.getByTestId("ended-toggle").click()
+    await expect(list.getByText("an old one")).toBeVisible()
+  } finally {
+    await removeSession(old.id)
   }
 })
 

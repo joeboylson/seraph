@@ -63,7 +63,7 @@ export default function App() {
     <SessionList
       sessions={sessions}
       selectedId={selectedId}
-      homes={Object.fromEntries(machines.map((m) => [m.id, m.home]))}
+      online={machines.map((m) => m.id)}
       onSelect={(id) => {
         select(id)
         setMenuOpen(false)

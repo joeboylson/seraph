@@ -1,4 +1,4 @@
-import { PlusIcon, SearchIcon } from "lucide-react"
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, PlusIcon, SearchIcon } from "lucide-react"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,38 +10,108 @@ export function sessionTitle(s: Session) {
   return s.name || s.cwd.split("/").filter(Boolean).pop() || s.cwd
 }
 
-function shortPath(path: string, home?: string) {
-  return home && path.startsWith(home) ? "~" + path.slice(home.length) : path
+const UNKNOWN = "Unknown computer"
+const deviceOf = (s: Session) => s.hostname ?? UNKNOWN
+
+function OnlineDot({ online }: { online: boolean }) {
+  return <span className={cn("size-2 shrink-0 rounded-full", online ? "bg-success" : "bg-muted-foreground/50")} title={online ? "Online" : "Offline"} aria-hidden />
 }
 
 export function SessionList({
   sessions,
   selectedId,
-  homes,
+  online,
   onSelect,
   onNew,
 }: {
   sessions: Session[]
   selectedId: string | null
-  /** Each online computer's home folder, by name. */
-  homes: Record<string, string>
+  /** The computers whose controller is running right now. */
+  online: string[]
   onSelect: (id: string) => void
   onNew: () => void
 }) {
+  // undefined: follow the open session's device. null: the device list.
+  const [picked, setPicked] = useState<string | null | undefined>(undefined)
+  const selected = sessions.find((s) => s.id === selectedId)
+  const device = picked === undefined ? (selected ? deviceOf(selected) : null) : picked
+
+  const devices = [...new Set([...online, ...sessions.map(deviceOf)])].sort(
+    (a, b) => Number(online.includes(b)) - Number(online.includes(a)) || a.localeCompare(b),
+  )
+
+  return (
+    <nav aria-label="Sessions" className="flex flex-col gap-s5">
+      <Button onClick={onNew} className="w-full rounded-full" data-testid="new-session">
+        <PlusIcon /> New session
+      </Button>
+      {device === null ? (
+        <section>
+          <p className="label px-s4 pb-s3">Devices</p>
+          {devices.length ? (
+            <ul>
+              {devices.map((d) => {
+                const running = sessions.filter((s) => deviceOf(s) === d && s.status !== "ended").length
+                return (
+                  <li key={d}>
+                    <button
+                      type="button"
+                      onClick={() => setPicked(d)}
+                      data-testid="device-item"
+                      className="flex w-full items-center gap-s3 py-s3 pr-s4 pl-s4 text-left text-muted-foreground transition-colors duration-[144ms] ease-slag hover:text-foreground"
+                    >
+                      <OnlineDot online={online.includes(d)} />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{d}</span>
+                      {running > 0 && <span className="label shrink-0 normal-case">{running} running</span>}
+                      <ChevronRightIcon className="size-4 shrink-0" />
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
+            <p className="px-s4 text-sm text-muted-foreground">No devices yet. Run the controller on a computer to see it here.</p>
+          )}
+        </section>
+      ) : (
+        <DeviceSessions
+          key={device}
+          device={device}
+          online={online.includes(device)}
+          sessions={sessions.filter((s) => deviceOf(s) === device)}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          onBack={() => setPicked(null)}
+        />
+      )}
+    </nav>
+  )
+}
+
+function DeviceSessions({
+  device,
+  online,
+  sessions,
+  selectedId,
+  onSelect,
+  onBack,
+}: {
+  device: string
+  online: boolean
+  sessions: Session[]
+  selectedId: string | null
+  onSelect: (id: string) => void
+  onBack: () => void
+}) {
   const [query, setQuery] = useState("")
-  // With sessions on several computers, say which one each is on.
-  const manyMachines = new Set(sessions.map((s) => s.hostname)).size > 1
   const [shown, setShown] = useState(20)
+  // Ended sessions stay folded away unless asked for, searched, or open.
+  const [endedOpen, setEndedOpen] = useState(() => sessions.some((s) => s.id === selectedId && s.status === "ended"))
   const q = query.trim().toLowerCase()
-  const matching = q ? sessions.filter((s) => `${s.name ?? ""} ${s.cwd}`.toLowerCase().includes(q)) : sessions
+  const matching = q ? sessions.filter((s) => sessionTitle(s).toLowerCase().includes(q)) : sessions
   const live = matching.filter((s) => s.status !== "ended")
   const allEnded = matching.filter((s) => s.status === "ended")
   const ended = allEnded.slice(0, shown)
-  // Running sessions on several computers are grouped under each one, online
-  // computers first. With one computer the list looks as it always has.
-  const groups = [...new Set(live.map((s) => s.hostname ?? "Unknown computer"))].sort(
-    (a, b) => Number(b in homes) - Number(a in homes) || a.localeCompare(b),
-  )
 
   const item = (s: Session) => (
     <li key={s.id}>
@@ -51,33 +121,32 @@ export function SessionList({
         aria-current={s.id === selectedId}
         data-testid="session-item"
         className={cn(
-          "w-full border-l-2 border-transparent py-s3 pr-s4 pl-s4 text-left transition-colors duration-[144ms] ease-slag",
+          "flex w-full items-center justify-between gap-s3 border-l-2 border-transparent py-s3 pr-s4 pl-s4 text-left transition-colors duration-[144ms] ease-slag",
           "text-muted-foreground hover:text-foreground",
           s.id === selectedId && "border-highlight text-foreground",
         )}
       >
-        <span className="flex items-center justify-between gap-s3">
-          <span className="truncate text-sm font-medium">{sessionTitle(s)}</span>
-          {s.status === "ended" ? (
-            <span className="label shrink-0 normal-case">{timeAgo(s.ended_at ?? s.updated_at)}</span>
-          ) : (
-            <StatusBadge status={s.status} className="shrink-0" />
-          )}
-        </span>
-        {/* Right-to-left so a long path loses its start, not the folder name. */}
-        <span className="block truncate font-mono text-xs [direction:rtl]" title={s.cwd}>
-          <bdi>{shortPath(s.cwd, s.hostname ? homes[s.hostname] : undefined)}</bdi>
-        </span>
-        {manyMachines && s.status === "ended" && s.hostname && <span className="label block truncate normal-case" data-testid="session-machine">{s.hostname}</span>}
+        <span className="truncate text-sm font-medium">{sessionTitle(s)}</span>
+        {s.status === "ended" ? (
+          <span className="label shrink-0 normal-case">{timeAgo(s.ended_at ?? s.updated_at)}</span>
+        ) : (
+          <StatusBadge status={s.status} className="shrink-0" />
+        )}
       </button>
     </li>
   )
 
   return (
-    <nav aria-label="Sessions" className="flex flex-col gap-s5">
-      <Button onClick={onNew} className="w-full rounded-full" data-testid="new-session">
-        <PlusIcon /> New session
-      </Button>
+    <>
+      <div className="flex flex-col gap-s2">
+        <Button variant="ghost" size="sm" className="w-fit rounded-full text-muted-foreground" onClick={onBack} data-testid="devices-back">
+          <ChevronLeftIcon /> Devices
+        </Button>
+        <p className="flex items-center gap-s2 px-s4 text-sm font-medium" data-testid="device-name">
+          <OnlineDot online={online} />
+          <span className="truncate">{device}</span>
+        </p>
+      </div>
       {sessions.length > 8 && (
         <label className="relative mx-s4 block">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-s3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -86,17 +155,7 @@ export function SessionList({
       )}
       <section>
         <p className="label px-s4 pb-s3">Running</p>
-        {groups.length > 1 ? (
-          groups.map((machine) => (
-            <div key={machine} className="pb-s3" data-testid="machine-group">
-              <p className="flex items-center gap-s2 px-s4 pb-s1 text-sm font-medium" title={machine in homes ? "Online" : "Offline"}>
-                <span className={cn("size-2 shrink-0 rounded-full", machine in homes ? "bg-success" : "bg-muted-foreground/50")} aria-hidden />
-                <span className="truncate">{machine}</span>
-              </p>
-              <ul>{live.filter((s) => (s.hostname ?? "Unknown computer") === machine).map(item)}</ul>
-            </div>
-          ))
-        ) : live.length ? (
+        {live.length ? (
           <ul>{live.map(item)}</ul>
         ) : (
           <p className="px-s4 text-sm text-muted-foreground">
@@ -106,15 +165,28 @@ export function SessionList({
       </section>
       {ended.length > 0 && (
         <section>
-          <p className="label px-s4 pb-s3">Ended</p>
-          <ul>{ended.map(item)}</ul>
-          {allEnded.length > shown && (
-            <Button variant="ghost" size="sm" className="mt-s2 ml-s2 rounded-full" onClick={() => setShown((n) => n + 30)}>
-              Show more ({allEnded.length - shown})
-            </Button>
+          <button
+            type="button"
+            onClick={() => setEndedOpen((o) => !o)}
+            aria-expanded={endedOpen || !!q}
+            className="label flex items-center gap-s2 px-s4 pb-s3 hover:text-foreground"
+            data-testid="ended-toggle"
+          >
+            <ChevronDownIcon className={cn("size-4 transition-transform duration-[144ms] ease-slag", !(endedOpen || q) && "-rotate-90")} />
+            Ended ({allEnded.length})
+          </button>
+          {(endedOpen || q) && (
+            <>
+              <ul>{ended.map(item)}</ul>
+              {allEnded.length > shown && (
+                <Button variant="ghost" size="sm" className="mt-s2 ml-s2 rounded-full" onClick={() => setShown((n) => n + 30)}>
+                  Show more ({allEnded.length - shown})
+                </Button>
+              )}
+            </>
           )}
         </section>
       )}
-    </nav>
+    </>
   )
 }
