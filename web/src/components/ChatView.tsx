@@ -102,18 +102,22 @@ export function ChatView({ messages, sent = [], working, loading, cwd }: { messa
   const bottom = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
 
-  // Follow new messages unless the person has scrolled up to read.
+  // Follow new messages unless the person has scrolled up to read. The
+  // chat scrolls inside its own area (marked data-scroll), not the page.
+  const shown = items.length > 0 || pending.length > 0 || working
   useEffect(() => {
+    const area = bottom.current?.closest<HTMLElement>("[data-scroll]")
+    if (!area) return
     const onScroll = () => {
-      const el = document.scrollingElement!
-      stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 200
+      stick.current = area.scrollHeight - area.scrollTop - area.clientHeight < 200
     }
-    window.addEventListener("scroll", onScroll, { passive: true })
-    return () => window.removeEventListener("scroll", onScroll)
-  }, [])
+    area.addEventListener("scroll", onScroll, { passive: true })
+    return () => area.removeEventListener("scroll", onScroll)
+  }, [shown])
   useEffect(() => {
-    if (stick.current) bottom.current?.scrollIntoView({ block: "end" })
-  }, [items.length, results.size, pending.length])
+    const area = bottom.current?.closest<HTMLElement>("[data-scroll]")
+    if (area && stick.current) area.scrollTop = area.scrollHeight
+  }, [items.length, results.size, pending.length, shown])
 
   if (!items.length && !pending.length && !working) {
     return <p className="py-s7 text-muted-foreground">{loading ? "Loading…" : "No messages yet. Send one below."}</p>

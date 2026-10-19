@@ -27,6 +27,9 @@ const MODE_LABELS: Record<string, string> = {
   dontAsk: "Don't ask",
 }
 
+// The only part of a session that scrolls; the bars above and below stay put.
+const SCROLL = "min-h-0 flex-1 overflow-y-auto overscroll-contain"
+
 const formatTokens = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : `${Math.round(n / 1000)}k`)
 
 /** Claude's todo list, folded to one line above the message box. */
@@ -105,8 +108,8 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
   const origin = session.mode === "headless" ? "Started from web" : linked ? "Linked, read-only" : `Terminal on ${session.hostname ?? "this Mac"}`
 
   return (
-    <div className="flex min-h-full flex-col">
-      <header className="flex min-w-0 flex-col gap-s1 border-b pb-s4">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <header className="flex min-w-0 shrink-0 flex-col gap-s1 border-b pb-s4">
         <div className="flex min-w-0 items-center gap-s4">
           <h1 className="min-w-0 truncate text-title font-medium tracking-[-0.03em]" data-testid="session-title">{sessionTitle(session)}</h1>
           <Button
@@ -142,8 +145,8 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
         </p>
       </header>
 
-      <Tabs value={tab} onValueChange={setTab} className="flex-1 gap-0">
-        <div className="flex flex-wrap items-center justify-between gap-s3 pt-s4">
+      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-s3 pt-s4">
           <TabsList className="w-fit">
             <TabsTrigger value="chat">Chat</TabsTrigger>
             <TabsTrigger value="changes" data-testid="changes-tab">
@@ -197,18 +200,18 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
             )}
           </div>
         </div>
-        <TabsContent value="chat">
+        <TabsContent value="chat" className={SCROLL} data-scroll>
           <ChatView messages={messages} sent={sent} working={session.status === "working"} loading={loading} cwd={session.cwd} />
         </TabsContent>
-        <TabsContent value="changes">
+        <TabsContent value="changes" className={SCROLL} data-scroll>
           <ChangesView files={changes} cwd={session.cwd} />
         </TabsContent>
-        <TabsContent value="terminal">
+        <TabsContent value="terminal" className={SCROLL} data-scroll>
           {mirror && <TerminalView mirror={mirror} sessionId={session.id} readOnly={ended} />}
         </TabsContent>
       </Tabs>
 
-      <div className="sticky bottom-0 flex flex-col gap-s3 border-t bg-background pt-s3 pb-[max(var(--spacing-s4),env(safe-area-inset-bottom))]">
+      <div className="flex shrink-0 flex-col gap-s3 border-t bg-background pt-s3 pb-[max(var(--spacing-s4),env(safe-area-inset-bottom))]">
         {todos && !ended && !prompt && todos.some((t) => t.status !== "completed") && tab === "chat" && <PlanBar todos={todos} />}
         {prompt && mirror && tab === "chat" && (
           <PromptCard key={promptKey(prompt)} prompt={prompt} sessionId={session.id} permission={permission} mirror={mirror} cwd={session.cwd} />

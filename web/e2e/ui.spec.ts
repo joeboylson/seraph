@@ -487,3 +487,26 @@ test("a menu without numbers (the folder-trust question) can be answered", async
   await yes.click()
   await expectCommand(session.id, "keys", (p) => JSON.stringify(p.keys) === '["Down","Enter"]')
 })
+
+for (const size of ["desktop", "phone"] as const) {
+  test(`only the chat scrolls; the bars stay put (${size})${size === "phone" ? " @mobile" : ""}`, async ({ page }) => {
+    const lines = Array.from({ length: 40 }, (_, i) => ({
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "text", text: `Line ${i + 1} of a long reply` }] },
+    }))
+    await addMessages(session.id, lines)
+    await page.goto(`/#/s/${session.id}`)
+    await expect(page.getByTestId("chat").getByText("Line 40 of a long reply")).toBeInViewport()
+    // The page never scrolls; everything else stays on screen.
+    expect(await page.evaluate(() => document.scrollingElement!.scrollHeight - window.innerHeight)).toBeLessThanOrEqual(1)
+    await expect(page.getByText("Seraph", { exact: true })).toBeInViewport()
+    await expect(page.getByTestId("session-title")).toBeInViewport()
+    await expect(page.getByTestId("composer")).toBeInViewport()
+    if (size === "desktop") await expect(page.getByRole("complementary").getByTestId("new-session")).toBeInViewport()
+    // Scrolling the chat back up moves only the chat.
+    await page.getByTestId("chat").getByText("Line 1 of a long reply").scrollIntoViewIfNeeded()
+    await expect(page.getByTestId("chat").getByText("Line 1 of a long reply")).toBeInViewport()
+    await expect(page.getByTestId("session-title")).toBeInViewport()
+    await expect(page.getByTestId("composer")).toBeInViewport()
+  })
+}

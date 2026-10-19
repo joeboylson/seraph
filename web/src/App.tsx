@@ -76,8 +76,9 @@ export default function App() {
   )
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-[1597px] flex-col px-s4 md:px-s5">
-      <header className="flex items-center justify-between gap-s4 py-s4">
+    // One screen tall: the bars stay put and only the content inside scrolls.
+    <div className="mx-auto flex h-dvh max-w-[1597px] flex-col overflow-hidden px-s4 md:px-s5">
+      <header className="flex shrink-0 items-center justify-between gap-s4 py-s4">
         <div className="flex items-center gap-s3">
           <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMenuOpen(true)} aria-label="Sessions">
             <MenuIcon />
@@ -112,13 +113,13 @@ export default function App() {
         </div>
       </header>
 
-      <div className="flex flex-1 gap-s6">
-        <aside className="hidden w-[233px] shrink-0 border-r py-s5 pr-s4 md:block">{list}</aside>
-        <main className="min-w-0 flex-1 py-s5">
+      <div className="flex min-h-0 flex-1 gap-s6">
+        <aside className="hidden w-[233px] shrink-0 overflow-y-auto overscroll-contain border-r py-s5 pr-s4 md:block">{list}</aside>
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col pt-s5">
           {selected ? (
             <SessionView key={selected.id} session={selected} onOpen={select} onDeleted={() => (location.hash = "")} />
           ) : (
-            <div className="flex flex-col gap-s4 py-s8">
+            <div className="flex flex-col gap-s4 overflow-y-auto py-s8">
               <h1 className="text-title font-medium tracking-[-0.03em]">
                 {loading ? "Loading…" : selectedId ? "Opening session…" : "No sessions yet"}
               </h1>
