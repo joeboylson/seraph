@@ -1,0 +1,169 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "@xterm/xterm/css/xterm.css";
+
+/* Slag Design System mapped onto shadcn's variables. Dark follows the OS
+ * (main.tsx sets `.dark` on <html>). */
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-sans);
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Five type sizes. shadcn's xs/sm map to the label size, base to body. */
+  --text-xs: 0.8125rem;
+  --text-sm: 0.8125rem;
+  --text-base: 1.0625rem;
+  --text-lg: 1.3125rem;
+  --text-label: 0.8125rem;
+  --text-body: 1.0625rem;
+  --text-lead: 1.3125rem;
+  --text-title: clamp(1.3125rem, 3vw, 2.125rem);
+
+  /* Fibonacci spacing: p-s4 is 13px, gap-s5 is 21px, and so on. */
+  --spacing-s1: 0.1875rem;
+  --spacing-s2: 0.3125rem;
+  --spacing-s3: 0.5rem;
+  --spacing-s4: 0.8125rem;
+  --spacing-s5: 1.3125rem;
+  --spacing-s6: 2.125rem;
+  --spacing-s7: 3.4375rem;
+  --spacing-s8: 5.5625rem;
+  --spacing-s9: 9rem;
+  --spacing-s10: 14.5625rem;
+
+  --radius-sm: 3px;
+  --radius-md: 8px;
+  --radius-lg: 13px;
+  --radius-xl: 13px;
+  --radius-2xl: 13px;
+
+  --ease-slag: cubic-bezier(0.2, 0, 0, 1);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-highlight: var(--highlight);
+  --color-on-highlight: var(--on-highlight);
+  --color-success: var(--success);
+  --color-info: var(--info);
+  --color-warning: var(--warning);
+}
+
+:root {
+  --background: #f0f0f0;
+  --foreground: #2a2a2a;
+  --card: #f0f0f0;
+  --card-foreground: #2a2a2a;
+  --popover: #f0f0f0;
+  --popover-foreground: #2a2a2a;
+  --primary: #2a2a2a;
+  --primary-foreground: #f0f0f0;
+  --secondary: #e4e4e4;
+  --secondary-foreground: #2a2a2a;
+  --muted: #e4e4e4;
+  --muted-foreground: #666666;
+  --accent: #e4e4e4;
+  --accent-foreground: #2a2a2a;
+  --destructive: #9d0006;
+  --border: #d9d9d9;
+  --input: #d9d9d9;
+  --ring: #b57614;
+  --highlight: #b57614;
+  --on-highlight: #1a1a1a;
+  --success: #6b670d;
+  --info: #076678;
+  --warning: #af3a03;
+  --selection: #decbae;
+  --radius: 13px;
+}
+
+.dark {
+  --background: #282828;
+  --foreground: #e4e4e4;
+  --card: #282828;
+  --card-foreground: #e4e4e4;
+  --popover: #282828;
+  --popover-foreground: #e4e4e4;
+  --primary: #e4e4e4;
+  --primary-foreground: #282828;
+  --secondary: #333333;
+  --secondary-foreground: #e4e4e4;
+  --muted: #333333;
+  --muted-foreground: #9a9a9a;
+  --accent: #333333;
+  --accent-foreground: #e4e4e4;
+  --destructive: #fb4934;
+  --border: #393939;
+  --input: #393939;
+  --ring: #fabd2f;
+  --highlight: #fabd2f;
+  --on-highlight: #282828;
+  --success: #b8bb26;
+  --info: #83a598;
+  --warning: #fabd2f;
+  --selection: #67552a;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    @apply font-sans;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-size: var(--text-body);
+    letter-spacing: -0.01em;
+    line-height: 1.618;
+  }
+  ::selection {
+    background: var(--selection);
+  }
+  :where(a, button, input, textarea, select, [role="button"], [tabindex]):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* The small mono caps label, the system's signature. */
+  .label {
+    font-family: var(--font-mono);
+    font-size: var(--text-label);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+    line-height: 1.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

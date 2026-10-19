@@ -1,0 +1,21 @@
+# Scratch folders the tests and smoke runs create
+sandbox/
+
+# Logs and local tool state
+csc.log
+.claude/scheduled_tasks.lock
+
+# Build and test output
+node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/
+
+# Supabase local state
+supabase/.temp/
+supabase/.branches/
+
+.DS_Store
+
+# Rust build output
+target/

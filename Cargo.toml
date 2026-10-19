@@ -1,0 +1,30 @@
+[package]
+name = "seraph"
+version = "0.2.0"
+edition = "2021"
+description = "Control Claude Code sessions from a web page, through Supabase"
+
+[[bin]]
+name = "seraph"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+libc = "0.2"
+p256 = { version = "0.13", features = ["ecdsa", "pem"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+regex = "1"
+rust-embed = { version = "8", features = ["include-exclude"] }
+serde_json = "1"
+sha1_smol = "1"
+signal-hook = "0.3"
+tiny_http = "0.12"
+ureq = { version = "2", features = ["json"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+strip = true
+lto = "thin"

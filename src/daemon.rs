@@ -1,0 +1,453 @@
+//! `seraph daemon`: starts sessions for the web page and serves the page.
+
+use crate::config;
+use crate::embedded::Page;
+use crate::push;
+use crate::supa::{api, finish_command, insert, log, now, quote, select_rows, update};
+use crate::util::{detach, process_alive};
+use anyhow::{anyhow, bail, Result};
+use regex::Regex;
+use serde_json::{json, Value};
+use std::fs::{self, OpenOptions};
+use std::path::{Component, Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
+use std::thread;
+use std::time::{Duration, Instant};
+
+fn list_dirs(path: Option<&str>) -> Result<Value> {
+    let asked = canonical_or_plain(&config::expand(path.unwrap_or("~")));
+    // A folder from an old session may be gone: show the nearest one that's left.
+    let mut path = asked.clone();
+    while !path.is_dir() {
+        match path.parent() {
+            Some(p) => path = p.to_path_buf(),
+            None => break,
+        }
+    }
+    let mut dirs: Vec<String> = fs::read_dir(&path)
+        .map_err(|e| anyhow!("{}: {}", e.kind(), path.display()))?
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            // Follow links, like a person browsing would.
+            (!name.starts_with('.') && e.path().is_dir()).then_some(name)
+        })
+        .collect();
+    dirs.sort_by_key(|d| d.to_lowercase());
+    let parent = path.parent().unwrap_or(&path).to_path_buf();
+    let mut result = json!({ "path": path, "parent": parent, "dirs": dirs });
+    if asked != path {
+        result["missing"] = json!(asked);
+    }
+    Ok(result)
+}
+
+/// The real path, or the path tidied up if it doesn't exist.
+fn canonical_or_plain(p: &Path) -> PathBuf {
+    fs::canonicalize(p).unwrap_or_else(|_| {
+        let mut out = PathBuf::new();
+        for c in p.components() {
+            match c {
+                Component::ParentDir => {
+                    out.pop();
+                }
+                Component::CurDir => {}
+                other => out.push(other),
+            }
+        }
+        out
+    })
+}
+
+/// What the page may pass on to Claude's command line. Each value must match,
+/// so nothing it sends can be read as another flag.
+fn start_fields() -> &'static [(&'static str, Regex)] {
+    static FIELDS: OnceLock<Vec<(&str, Regex)>> = OnceLock::new();
+    FIELDS.get_or_init(|| {
+        [
+            ("name", r"^[^-\x00-\x1f][^\x00-\x1f]{0,99}$"),
+            ("model", r"^[A-Za-z0-9][A-Za-z0-9._\[\]-]{0,63}$"),
+            ("permission_mode", r"^(default|acceptEdits|plan|auto|bypassPermissions|dontAsk)$"),
+            ("resume", r"^[0-9a-fA-F-]{8,64}$"),
+            ("size", r"^\d{2,3}x\d{2,3}$"),
+        ]
+        .into_iter()
+        .map(|(f, p)| (f, Regex::new(p).expect("valid pattern")))
+        .collect()
+    })
+}
+
+fn start_session(payload: &Value) -> Result<Value> {
+    for (field, pattern) in start_fields() {
+        match &payload[*field] {
+            Value::Null => {}
+            Value::String(s) if pattern.is_match(s) => {}
+            _ => bail!("invalid {field}"),
+        }
+    }
+    let cwd_raw = payload["cwd"].as_str().ok_or_else(|| anyhow!("missing cwd"))?;
+    let expanded = config::expand(cwd_raw);
+    if payload["create"] == true {
+        fs::create_dir_all(&expanded)?;
+    }
+    let cwd = canonical_or_plain(&expanded);
+    if !cwd.is_dir() {
+        bail!("not a folder: {}", cwd.display());
+    }
+    let session_id = uuid::Uuid::new_v4().to_string();
+    // Create the row now so the page can open the session straight away;
+    // the wrapper fills in the rest once it starts.
+    insert(
+        "sessions",
+        &json!({ "id": session_id, "name": payload["name"], "cwd": cwd, "hostname": config::machine(), "mode": "headless" }),
+        "return=minimal",
+    )?;
+    let size = payload["size"].as_str().unwrap_or("120x40");
+    let mut argv = vec!["claude".to_string(), "--seraph-headless".into(), "--seraph-id".into(), session_id.clone(), "--seraph-size".into(), size.into()];
+    for (field, flag) in [("name", "--name"), ("permission_mode", "--permission-mode"), ("model", "--model"), ("resume", "--resume")] {
+        if let Some(v) = payload[field].as_str() {
+            argv.push(flag.into());
+            argv.push(v.into());
+        }
+    }
+    let log_file = OpenOptions::new().create(true).append(true).open(config::log_path())?;
+    detach(
+        Command::new(config::exe())
+            .args(&argv)
+            .current_dir(&cwd)
+            .stdin(Stdio::null())
+            .stdout(log_file.try_clone()?)
+            .stderr(log_file),
+    )
+    .spawn()?;
+    if let Some(prompt) = payload["prompt"].as_str() {
+        // Waits in the queue until the new session is ready for it.
+        insert(
+            "commands",
+            &json!({ "session_id": session_id, "kind": "prompt", "payload": { "text": prompt } }),
+            "return=minimal",
+        )?;
+    }
+    Ok(json!({ "session_id": session_id, "cwd": cwd }))
+}
+
+/// Mark a request as ours. Only one controller's update finds it still pending.
+pub fn claim(cmd_id: i64) -> Result<bool> {
+    let rows = api(
+        "PATCH",
+        &format!("/rest/v1/commands?id=eq.{cmd_id}&status=eq.pending"),
+        Some(&json!({ "status": "running" })),
+        Some("return=representation"),
+    )?;
+    Ok(rows.as_array().is_some_and(|r| !r.is_empty()))
+}
+
+fn handle(cmd: &Value) -> Result<Value> {
+    let payload = &cmd["payload"];
+    match cmd["kind"].as_str().unwrap_or("") {
+        "list_dirs" => list_dirs(payload["path"].as_str()),
+        "start_session" => start_session(payload),
+        other => bail!("unknown command: {other}"),
+    }
+}
+
+/// An error message for the page: the OS reason without codes, e.g.
+/// "No such file or directory: /some/path".
+fn readable(e: &anyhow::Error) -> String {
+    if let Some(io) = e.downcast_ref::<std::io::Error>() {
+        let text = io.to_string();
+        return text.split(" (os error").next().unwrap_or(&text).to_string();
+    }
+    e.to_string()
+}
+
+// ---- the page ---------------------------------------------------------------
+
+const LOOPBACK: [&str; 4] = ["127.0.0.1", "localhost", "::1", "[::1]"];
+
+/// What the web page needs to reach Supabase. Served as /config.json.
+///
+/// Opened on this machine, the page can use the same address seraph does.
+/// Opened from elsewhere (e.g. through Tailscale), it needs the address
+/// set for browsers, if there is one.
+fn browser_settings(page_host: &str, vapid: &Option<String>) -> Result<Value> {
+    let s = config::require()?;
+    let host = page_host.rsplit_once(':').map_or(page_host, |(h, _)| h);
+    let url = if LOOPBACK.contains(&host) { s.url.clone() } else { s.browser_url.clone().unwrap_or(s.url.clone()) };
+    Ok(json!({ "supabaseUrl": url, "supabaseKey": s.key, "vapidPublicKey": vapid }))
+}
+
+fn content_type(path: &Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
+        "html" => "text/html; charset=utf-8",
+        "js" | "mjs" => "text/javascript",
+        "css" => "text/css",
+        "json" => "application/json",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "ico" => "image/x-icon",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        "txt" => "text/plain; charset=utf-8",
+        "map" => "application/json",
+        _ => "application/octet-stream",
+    }
+}
+
+fn header(name: &str, value: &str) -> tiny_http::Header {
+    tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()).expect("valid header")
+}
+
+/// This computer's platform as `uname` names it, e.g. "darwin-arm64".
+fn platform() -> String {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        other => other,
+    };
+    let arch = match std::env::consts::ARCH {
+        "aarch64" if os == "darwin" => "arm64",
+        other => other,
+    };
+    format!("{os}-{arch}")
+}
+
+/// The script behind `curl -fsSL <page>/install | sh`: fetches this
+/// computer's own binary, for devices of the same kind. Keys never travel;
+/// each device runs `seraph setup` once.
+fn install_script(origin: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+# Installs or updates seraph from {origin}
+set -e
+want="{platform}"
+have="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+if [ "$have" != "$want" ]; then
+  echo "This computer is $have, but {origin} runs $want, so its copy won't run here." >&2
+  echo "Build it from the repo instead: ./install.sh" >&2
+  exit 1
+fi
+mkdir -p "$HOME/.local/bin"
+tmp="$HOME/.local/bin/.seraph.download"
+curl -fsSL "{origin}/download/seraph" -o "$tmp"
+chmod +x "$tmp"
+mv "$tmp" "$HOME/.local/bin/seraph"
+seraph="$HOME/.local/bin/seraph"
+echo "Installed $("$seraph" --version) in $HOME/.local/bin"
+if "$seraph" status 2>/dev/null | grep -q "Controller: running"; then
+  "$seraph" restart
+fi
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *) echo 'Add this to your shell profile: export PATH="$HOME/.local/bin:$PATH"' ;;
+esac
+if [ ! -f "${{SERAPH_HOME:-$HOME/.seraph}}/config.json" ]; then
+  echo "Next: seraph setup (with the same project URL and keys as your other computers), then seraph start"
+fi
+"#,
+        platform = platform()
+    )
+}
+
+fn serve(request: tiny_http::Request, vapid: &Option<String>) {
+    let url_path = request.url().split('?').next().unwrap_or("/").to_string();
+    let host = request.headers().iter().find(|h| h.field.equiv("Host")).map(|h| h.value.to_string()).unwrap_or_default();
+    if url_path == "/install" {
+        // Reached through Tailscale's HTTPS, or plainly on this machine.
+        let local = LOOPBACK.contains(&host.rsplit_once(':').map_or(host.as_str(), |(h, _)| h));
+        let origin = format!("{}://{host}", if local { "http" } else { "https" });
+        let res = tiny_http::Response::from_string(install_script(&origin)).with_header(header("Content-Type", "text/x-shellscript"));
+        let _ = request.respond(res);
+        return;
+    }
+    if url_path == "/download/seraph" {
+        match fs::File::open(config::exe()) {
+            Ok(f) => {
+                let _ = request.respond(tiny_http::Response::from_file(f).with_header(header("Content-Type", "application/octet-stream")));
+            }
+            Err(e) => {
+                let _ = request.respond(tiny_http::Response::from_string(e.to_string()).with_status_code(500));
+            }
+        }
+        return;
+    }
+    if url_path == "/config.json" {
+        let body = browser_settings(&host, vapid).map(|v| v.to_string()).unwrap_or_else(|e| json!({ "error": e.to_string() }).to_string());
+        let res = tiny_http::Response::from_string(body)
+            .with_header(header("Content-Type", "application/json"))
+            .with_header(header("Cache-Control", "no-store"));
+        let _ = request.respond(res);
+        return;
+    }
+    // Single-page app: unknown paths get index.html. Lookups only ever hit
+    // the files built into the binary, so no path can reach the disk.
+    let name = url_path.trim_start_matches('/');
+    let (name, file) = match Page::get(name) {
+        Some(f) if !name.is_empty() => (name, f),
+        _ => match Page::get("index.html") {
+            Some(f) => ("index.html", f),
+            None => {
+                let _ = request.respond(tiny_http::Response::from_string("This build has no page; build it with ./install.sh.").with_status_code(404));
+                return;
+            }
+        },
+    };
+    let res = tiny_http::Response::from_data(file.data.into_owned()).with_header(header("Content-Type", content_type(Path::new(name))));
+    let _ = request.respond(res);
+}
+
+// ---- upkeep -----------------------------------------------------------------
+
+fn heartbeat(controller_id: &str) -> Result<()> {
+    api(
+        "POST",
+        "/rest/v1/controllers?on_conflict=id",
+        Some(&json!({ "id": controller_id, "hostname": controller_id, "home": config::user_home(), "last_seen": now(), "version": crate::VERSION })),
+        Some("resolution=merge-duplicates,return=minimal"),
+    )?;
+    Ok(())
+}
+
+/// Mark sessions ended when the process behind them is gone, e.g. after a crash.
+fn end_dead_sessions(hostname: &str) -> Result<()> {
+    let rows = select_rows("sessions", &format!("hostname=eq.{}&status=neq.ended&select=id,pid", quote(hostname)))?;
+    for row in rows {
+        let Some(pid) = row["pid"].as_i64() else { continue };
+        if !process_alive(pid as i32) {
+            update("sessions", &format!("id=eq.{}", row["id"].as_str().unwrap_or("")), &json!({ "status": "ended", "ended_at": now(), "updated_at": now() }))?;
+        }
+    }
+    Ok(())
+}
+
+/// Delete images attached to sessions that have since been deleted.
+fn remove_orphan_uploads(_: &str) -> Result<()> {
+    let Ok(entries) = fs::read_dir(config::uploads_dir()) else { return Ok(()) };
+    let id = Regex::new(r"^[0-9a-f-]{36}$")?;
+    let folders: Vec<String> = entries.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|f| id.is_match(f)).collect();
+    if folders.is_empty() {
+        return Ok(());
+    }
+    let alive: Vec<String> = select_rows("sessions", &format!("id=in.({})&select=id", folders.join(",")))?
+        .iter()
+        .filter_map(|r| r["id"].as_str().map(str::to_string))
+        .collect();
+    for folder in folders.iter().filter(|f| !alive.contains(f)) {
+        let _ = fs::remove_dir_all(config::uploads_dir().join(folder));
+    }
+    Ok(())
+}
+
+/// How many transcript lines and hook events each session keeps.
+pub const KEEP: usize = 50;
+
+/// Drop everything the page no longer needs (see the csc_purge migration).
+fn purge(_: &str) -> Result<()> {
+    api("POST", "/rest/v1/rpc/csc_purge", Some(&json!({ "keep": KEEP })), None)?;
+    Ok(())
+}
+
+fn every(last: &mut Option<Instant>, secs: u64) -> bool {
+    if last.is_none_or(|t| t.elapsed().as_secs() >= secs) {
+        *last = Some(Instant::now());
+        return true;
+    }
+    false
+}
+
+/// A named upkeep job, run with the controller's name.
+type Step = (&'static str, fn(&str) -> Result<()>);
+
+fn run_steps(controller_id: &str, steps: &[Step]) {
+    // Each step on its own, so one slow call doesn't skip the others.
+    for (name, step) in steps {
+        if let Err(e) = step(controller_id) {
+            log(format!("daemon {name}: {e}"));
+        }
+    }
+}
+
+fn run_requests(controller_id: &str) -> Result<()> {
+    let cmds = select_rows(
+        "commands",
+        &format!("session_id=is.null&status=eq.pending&or=(target.is.null,target.eq.{})&order=id&select=id,kind,payload", quote(controller_id)),
+    )?;
+    for cmd in cmds {
+        let id = cmd["id"].as_i64().unwrap_or(0);
+        if !claim(id)? {
+            continue; // another computer got it first
+        }
+        match handle(&cmd) {
+            Ok(result) => finish_command(id, Some(result), None)?,
+            Err(e) => {
+                log(format!("daemon command {id}: {e}"));
+                finish_command(id, None, Some(readable(&e)))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn cmd_daemon() -> Result<i32> {
+    let s = config::require()?;
+    let controller_id = config::machine();
+    // Before serving the page, which hands out the key's public half.
+    if let Err(e) = push::sync_key() {
+        log(format!("daemon push key: {e}"));
+    }
+    let vapid = push::public_key().map_err(|e| log(format!("push: no VAPID key ({e})"))).ok();
+
+    let server = tiny_http::Server::http(("127.0.0.1", s.web_port)).map_err(|e| {
+        anyhow!(
+            "seraph daemon: can't use port {} ({e}). Is it already running? Try `seraph status`, or set another port with `seraph setup --web-port`.",
+            s.web_port
+        )
+    })?;
+    let server = Arc::new(server);
+    for _ in 0..4 {
+        let (server, vapid) = (server.clone(), vapid.clone());
+        thread::spawn(move || {
+            for request in server.incoming_requests() {
+                serve(request, &vapid);
+            }
+        });
+    }
+    fs::create_dir_all(config::home())?;
+    fs::write(config::pid_path(), std::process::id().to_string())?;
+
+    let stop = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(signal_hook::consts::SIGTERM, stop.clone())?;
+    signal_hook::flag::register(signal_hook::consts::SIGINT, stop.clone())?;
+    println!("seraph daemon: page on http://127.0.0.1:{}, Supabase at {}", s.web_port, s.url);
+
+    let (mut last_beat, mut last_purge, mut last_watch) = (None, None, None);
+    let mut watcher = push::Watcher::default();
+    while !stop.load(Ordering::Relaxed) {
+        if every(&mut last_watch, 3) {
+            if let Err(e) = watcher.check(&controller_id) {
+                log(format!("daemon push: {e}"));
+            }
+        }
+        if every(&mut last_purge, 60) {
+            run_steps(&controller_id, &[("purge", purge), ("remove_orphan_uploads", remove_orphan_uploads)]);
+        }
+        if every(&mut last_beat, 10) {
+            run_steps(&controller_id, &[("heartbeat", heartbeat), ("end_dead_sessions", end_dead_sessions)]);
+        }
+        if let Err(e) = run_requests(&controller_id) {
+            log(format!("daemon: {e}"));
+        }
+        for _ in 0..10 {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+    // A clean exit, so launchd/systemd don't restart it after `seraph stop`.
+    let _ = fs::remove_file(config::pid_path());
+    Ok(0)
+}
