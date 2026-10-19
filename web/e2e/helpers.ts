@@ -1,9 +1,9 @@
 import { createClient } from "@supabase/supabase-js"
 import { expect, type Page } from "@playwright/test"
 
-import { seraphSettings } from "./settings"
+import { testSettings } from "./settings"
 
-const { url: SUPABASE_URL, secretKey: SECRET_KEY } = seraphSettings()
+const { url: SUPABASE_URL, secretKey: SECRET_KEY } = testSettings()
 
 /** Plays seraph's part, so it uses the secret key and skips the members-only rules. */
 export const db = createClient(SUPABASE_URL, SECRET_KEY, { auth: { persistSession: false, autoRefreshToken: false } })

@@ -27,3 +27,6 @@ dist-ssr
 e2e/.auth/
 .vercel
 .env*
+
+# The tests' own seraph settings (local Supabase keys)
+e2e/.seraph/

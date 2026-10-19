@@ -47,15 +47,21 @@ set (there's no controller to ask in dev mode).
 
 ## Tests
 
-Playwright, run against the page the controller serves, using the
-settings in `~/.seraph/config.json`:
+Playwright, against a local Supabase of their own, never the one in
+`~/.seraph`. Each run starts this repo's local Supabase in Docker (if it
+isn't already running), applies `supabase/migrations`, and runs a controller
+of its own beside yours. Their settings live in `web/e2e/.seraph`, and the
+tests refuse to run against anything but a local address.
 
 ```sh
 cd web
-npm test            # UI tests: the test plays the wrapper's side, no Claude needed (~20s)
+npm test            # UI tests: the test plays the wrapper's side, no Claude needed (~1–2 min)
 npm run test:real   # a real Claude (Haiku) builds a small app entirely through
-                    # the page; needs `seraph start`; costs a few cents (~1–3 min)
+                    # the page; costs a few cents (~1–3 min)
 ```
+
+Needs Docker and the Supabase CLI. `supabase stop` (from the repo root)
+shuts the test stack down when you're done.
 
 `web/scripts/screen.mjs <session id>` prints a session's current screen,
 which is handy for seeing what Claude is showing.

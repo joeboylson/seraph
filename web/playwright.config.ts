@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test"
-import { seraphSettings } from "./e2e/settings"
+import { testSettings } from "./e2e/settings"
 
 const storageState = "e2e/.auth/state.json"
 
@@ -9,10 +9,11 @@ const executablePath =
   process.env.SERAPH_CHROME ??
   `${process.env.HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/chrome-headless-shell`
 
-// Builds the page with the settings in ~/.seraph/config.json and serves it
-// on 127.0.0.1:4173. `npm test` runs the fast UI suite; `npm run test:real`
-// drives a real Claude session end to end (needs `seraph start`).
-const supabase = seraphSettings()
+// Builds the page against the tests' local Supabase (never the one in
+// ~/.seraph) and serves it on 127.0.0.1:4173. `npm test` starts that Supabase
+// and a controller of its own, then runs the fast UI suite; `npm run test:real`
+// drives a real Claude session end to end the same way.
+const supabase = testSettings()
 const pageUrl = "http://127.0.0.1:4173"
 
 export default defineConfig({

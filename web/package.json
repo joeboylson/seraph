@@ -8,8 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "playwright test --project=desktop --project=mobile",
-    "test:real": "playwright test --project=real"
+    "test": "node scripts/test-supabase.mjs && node scripts/with-controller.mjs npx playwright test --project=desktop --project=mobile",
+    "test:real": "node scripts/test-supabase.mjs && node scripts/with-controller.mjs npx playwright test --project=real"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
