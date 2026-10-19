@@ -1,5 +1,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { db } from "@/lib/supabase"
 
@@ -67,10 +69,10 @@ export function Login() {
 
       {!sent ? (
         <form onSubmit={sendCode} className="flex flex-col gap-s4">
-          <label className="flex flex-col gap-s2">
-            <span className="label">Email</span>
-            <Input type="email" autoComplete="email" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)} data-testid="login-email" />
-          </label>
+          <Field>
+            <FieldLabel htmlFor="f-email" className="label">Email</FieldLabel>
+            <Input id="f-email" type="email" autoComplete="email" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)} data-testid="login-email" />
+          </Field>
           <Button type="submit" className="w-fit rounded-full" disabled={busy || !email.trim()}>
             {busy ? "Sending…" : "Send code"}
           </Button>
@@ -81,9 +83,9 @@ export function Login() {
             We emailed {email.trim()}. Tap the link in it, or type its code here. It can take a minute to arrive. No email? Run{" "}
             <code className="font-mono">seraph user code {email.trim()}</code> on your computer.
           </p>
-          <label className="flex flex-col gap-s2">
-            <span className="label">Code</span>
-            <Input
+          <Field>
+            <FieldLabel htmlFor="f-code" className="label">Code</FieldLabel>
+            <Input id="f-code"
               inputMode="numeric"
               autoComplete="one-time-code"
               required
@@ -93,7 +95,7 @@ export function Login() {
               className="font-mono tracking-[0.2em]"
               data-testid="login-code"
             />
-          </label>
+          </Field>
           <div className="flex items-center gap-s3">
             <Button type="submit" className="rounded-full" disabled={busy || !code.trim()}>
               {busy ? "Checking…" : "Sign in"}
@@ -115,9 +117,9 @@ export function Login() {
       )}
 
       {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
     </main>
   )

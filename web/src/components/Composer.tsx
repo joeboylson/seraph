@@ -1,7 +1,9 @@
 import { ImageIcon, SendIcon, SquareIcon, XIcon } from "lucide-react"
 import { useLayoutEffect, useRef, useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
+import { Attachment, AttachmentAction, AttachmentActions, AttachmentGroup, AttachmentMedia } from "@/components/ui/attachment"
+import { Command, CommandItem, CommandList } from "@/components/ui/command"
+import { FieldError } from "@/components/ui/field"
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group"
 import { sendCommand } from "@/lib/commands"
 
 // Shown when the message starts with "/". Anything else typed is sent as is,
@@ -31,7 +33,7 @@ const SLASH_COMMANDS = [
   ["/help", "List commands"],
 ] as const
 
-type Attachment = { name: string; type: string; data: string; url: string }
+type Image = { name: string; type: string; data: string; url: string }
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_HEIGHT = 233
@@ -39,7 +41,7 @@ const MAX_HEIGHT = 233
 // Phone keyboards have no Shift+Enter, so there Enter adds a line and the button sends.
 const touch = () => window.matchMedia("(pointer: coarse)").matches
 
-function readImage(file: File): Promise<Attachment> {
+function readImage(file: File): Promise<Image> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => {
@@ -54,7 +56,7 @@ function readImage(file: File): Promise<Attachment> {
 export function Composer({ sessionId, working, disabled }: { sessionId: string; working: boolean; disabled: boolean }) {
   const [text, setText] = useState("")
   const [sending, setSending] = useState(false)
-  const [images, setImages] = useState<Attachment[]>([])
+  const [images, setImages] = useState<Image[]>([])
   const [imageError, setImageError] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const box = useRef<HTMLTextAreaElement>(null)
@@ -108,56 +110,48 @@ export function Composer({ sessionId, working, disabled }: { sessionId: string; 
       }}
     >
       {matches.length > 0 && (
-        <ul className="absolute bottom-full mb-s3 max-h-72 w-full overflow-auto rounded-lg border bg-popover py-s2" role="listbox" aria-label="Commands">
-          {matches.map(([name, help]) => (
-            <li key={name}>
-              <button
-                type="button"
-                className="flex w-full gap-s4 px-s4 py-s2 text-left text-sm hover:bg-accent"
-                onClick={() => send(name)}
-              >
+        <Command shouldFilter={false} className="absolute bottom-full mb-s3 h-auto w-full rounded-lg border">
+          <CommandList label="Commands">
+            {matches.map(([name, help]) => (
+              <CommandItem key={name} value={name} onSelect={() => send(name)} className="gap-s4">
                 <span className="font-mono">{name}</span>
                 <span className="text-muted-foreground">{help}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
+              </CommandItem>
+            ))}
+          </CommandList>
+        </Command>
       )}
       {images.length > 0 && (
-        <ul className="flex flex-wrap gap-s3" aria-label="Attached images">
+        <AttachmentGroup aria-label="Attached images">
           {images.map((image, i) => (
-            <li key={i} className="relative">
-              <img src={image.url} alt={image.name} className="size-[55px] rounded-md border object-cover" />
-              <button
-                type="button"
-                className="absolute -top-s2 -right-s2 rounded-full border bg-background p-s1"
-                onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
-                aria-label={`Remove ${image.name}`}
-              >
-                <XIcon className="size-3" />
-              </button>
-            </li>
+            <Attachment key={i} size="xs">
+              <AttachmentMedia variant="image">
+                <img src={image.url} alt={image.name} />
+              </AttachmentMedia>
+              <AttachmentActions>
+                <AttachmentAction onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))} aria-label={`Remove ${image.name}`}>
+                  <XIcon />
+                </AttachmentAction>
+              </AttachmentActions>
+            </Attachment>
           ))}
-        </ul>
+        </AttachmentGroup>
       )}
-      {imageError && <p className="text-sm text-destructive">{imageError}</p>}
-      <div className="flex items-end gap-s2">
-        <input
-          ref={fileInput}
-          type="file"
-          accept="image/png,image/jpeg,image/gif,image/webp"
-          multiple
-          hidden
-          onChange={(e) => {
-            addImages(e.target.files ?? [])
-            e.target.value = ""
-          }}
-          data-testid="image-input"
-        />
-        <Button type="button" variant="ghost" size="icon" className="mb-0.5 shrink-0 rounded-full" disabled={disabled} onClick={() => fileInput.current?.click()} aria-label="Attach image" title="Attach image">
-          <ImageIcon />
-        </Button>
-        <Textarea
+      {imageError && <FieldError>{imageError}</FieldError>}
+      <input
+        ref={fileInput}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        multiple
+        hidden
+        onChange={(e) => {
+          addImages(e.target.files ?? [])
+          e.target.value = ""
+        }}
+        data-testid="image-input"
+      />
+      <InputGroup className="rounded-2xl">
+        <InputGroupTextarea
           ref={box}
           onPaste={(e) => {
             const files = [...e.clipboardData.files]
@@ -177,36 +171,41 @@ export function Composer({ sessionId, working, disabled }: { sessionId: string; 
           placeholder={disabled ? "This session has ended" : "Message Claude, / for commands"}
           disabled={disabled}
           rows={1}
-          className="min-h-10 min-w-0 flex-1 resize-none placeholder:truncate rounded-2xl px-s4 py-s2 text-body"
+          className="min-h-10 px-s4 py-s3 text-body placeholder:truncate"
           aria-label="Message"
           data-testid="composer"
         />
-        {working && (
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="mb-0.5 shrink-0 rounded-full"
-            onClick={() => sendCommand(sessionId, "interrupt")}
-            aria-label="Stop Claude (Esc)"
-            title="Stop Claude (Esc)"
-            data-testid="interrupt"
+        <InputGroupAddon align="block-end">
+          <InputGroupButton size="icon-sm" className="rounded-full" disabled={disabled} onClick={() => fileInput.current?.click()} aria-label="Attach image" title="Attach image">
+            <ImageIcon />
+          </InputGroupButton>
+          {working && (
+            <InputGroupButton
+              variant="outline"
+              size="icon-sm"
+              className="ml-auto rounded-full"
+              onClick={() => sendCommand(sessionId, "interrupt")}
+              aria-label="Stop Claude (Esc)"
+              title="Stop Claude (Esc)"
+              data-testid="interrupt"
+            >
+              <SquareIcon />
+            </InputGroupButton>
+          )}
+          <InputGroupButton
+            type="submit"
+            variant="default"
+            size="icon-sm"
+            className={working ? "rounded-full" : "ml-auto rounded-full"}
+            disabled={disabled || sending || (!text.trim() && !images.length)}
+            aria-label="Send"
+            title="Send (Enter)"
+            data-testid="send"
           >
-            <SquareIcon />
-          </Button>
-        )}
-        <Button
-          type="submit"
-          size="icon"
-          className="mb-0.5 shrink-0 rounded-full"
-          disabled={disabled || sending || (!text.trim() && !images.length)}
-          aria-label="Send"
-          title="Send (Enter)"
-          data-testid="send"
-        >
-          <SendIcon />
-        </Button>
-      </div>
+            <SendIcon />
+          </InputGroupButton>
+        </InputGroupAddon>
+      </InputGroup>
     </form>
   )
 }

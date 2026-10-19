@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
 import { sendKeys, type KeyName } from "@/lib/commands"
 import type { TerminalMirror } from "@/lib/terminal"
 
@@ -57,12 +58,14 @@ export function TerminalView({ mirror, sessionId, readOnly }: { mirror: Terminal
         <div ref={host} />
       </div>
       {!readOnly && (
-        <div className="flex flex-wrap gap-s3" aria-label="Keys">
-          {KEY_BAR.map((k) => (
-            <Button key={k.label} variant="outline" size="sm" className="rounded-full font-mono" onClick={() => sendKeys(sessionId, k.keys)}>
-              {k.label}
-            </Button>
-          ))}
+        <div className="overflow-x-auto">
+          <ButtonGroup aria-label="Keys">
+            {KEY_BAR.map((k) => (
+              <Button key={k.label} variant="outline" size="sm" className="font-mono" onClick={() => sendKeys(sessionId, k.keys)}>
+                {k.label}
+              </Button>
+            ))}
+          </ButtonGroup>
         </div>
       )}
     </div>

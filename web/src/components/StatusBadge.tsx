@@ -1,3 +1,4 @@
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import type { SessionStatus } from "@/lib/types"
 
@@ -19,9 +20,9 @@ const DOT: Record<SessionStatus, string> = {
 
 export function StatusBadge({ status, className }: { status: SessionStatus; className?: string }) {
   return (
-    <span className={cn("label inline-flex items-center gap-s3 normal-case", className)} data-status={status}>
+    <Badge variant="outline" className={cn("label gap-s2 normal-case", className)} data-status={status}>
       <span className={cn("size-2 rounded-full", DOT[status])} aria-hidden />
       {LABELS[status]}
-    </span>
+    </Badge>
   )
 }

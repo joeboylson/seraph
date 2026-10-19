@@ -1,7 +1,12 @@
-import { BellIcon, LogOutIcon, MenuIcon, PlusIcon } from "lucide-react"
+import { BellIcon, LogOutIcon, PlusIcon } from "lucide-react"
 import { useEffect, useState } from "react"
+import { toast } from "sonner"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
+import { Toaster } from "@/components/ui/sonner"
+import { Spinner } from "@/components/ui/spinner"
 import { NewSessionDialog } from "@/components/NewSessionDialog"
 import { SessionList } from "@/components/SessionList"
 import { SessionView } from "@/components/SessionView"
@@ -29,17 +34,8 @@ export default function App() {
   const connected = useConnected()
   const [selectedId, select] = useHashSession()
   const [newOpen, setNewOpen] = useState(false)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [sendError, setSendError] = useState<string | null>(null)
 
-  useEffect(
-    () =>
-      onCommandError((message) => {
-        setSendError(message)
-        setTimeout(() => setSendError(null), 8000)
-      }),
-    [],
-  )
+  useEffect(() => onCommandError((message) => toast.error(message, { duration: 8000 })), [])
 
   const selected = sessions.find((s) => s.id === selectedId) ?? null
 
@@ -59,94 +55,77 @@ export default function App() {
     }
   }, [selectedId, sessions, select])
 
-  const list = (
-    <SessionList
-      sessions={sessions}
-      selectedId={selectedId}
-      online={machines.map((m) => m.id)}
-      onSelect={(id) => {
-        select(id)
-        setMenuOpen(false)
-      }}
-      onNew={() => {
-        setNewOpen(true)
-        setMenuOpen(false)
-      }}
-    />
-  )
-
   return (
     // One screen tall: the bars stay put and only the content inside scrolls.
-    <div className="mx-auto flex h-dvh max-w-[1597px] flex-col overflow-hidden px-s4 md:px-s5">
-      <header className="flex shrink-0 items-center justify-between gap-s4 py-s4">
-        <div className="flex items-center gap-s3">
-          <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMenuOpen(true)} aria-label="Sessions">
-            <MenuIcon />
-          </Button>
-          <span className="font-medium">Seraph</span>
-        </div>
-        <div className="flex items-center gap-s4">
-          {notifications.ask && (
-            <Button variant="ghost" size="sm" className="rounded-full" onClick={notifications.ask}>
-              <BellIcon /> Notify me
+    <SidebarProvider className="h-dvh min-h-0 overflow-hidden">
+      <SessionList
+        sessions={sessions}
+        selectedId={selectedId}
+        online={machines.map((m) => m.id)}
+        onSelect={select}
+        onNew={() => setNewOpen(true)}
+      />
+      <SidebarInset className="min-h-0 min-w-0 overflow-hidden px-s4 md:px-s5">
+        <header className="flex shrink-0 items-center justify-between gap-s4 py-s4">
+          <div className="flex items-center gap-s3">
+            <SidebarTrigger className="-ml-s2" aria-label="Sessions" title="Sessions" />
+            <span className="font-medium">Seraph</span>
+          </div>
+          <div className="flex items-center gap-s4">
+            {notifications.ask && (
+              <Button variant="ghost" size="sm" className="rounded-full" onClick={notifications.ask}>
+                <BellIcon /> Notify me
+              </Button>
+            )}
+            {connected ? (
+              <Badge variant="outline" className="label min-w-0 shrink gap-s2" data-testid="controller-status" data-online={online}>
+                <span className={`size-2 shrink-0 rounded-full ${online ? "bg-success" : "bg-destructive"}`} aria-hidden />
+                <span className="truncate" title={machines.map((m) => m.id).join(", ")}>
+                  {machines.length > 1 ? `${machines.length} computers` : online ? machines[0].id : "Controller offline"}
+                </span>
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="label gap-s2" data-testid="connection-lost" role="status">
+                <Spinner className="size-3 text-warning" />
+                Reconnecting…
+              </Badge>
+            )}
+            <Button variant="ghost" size="icon-sm" className="md:hidden" onClick={() => setNewOpen(true)} aria-label="New session" title="New session" data-testid="header-new-session">
+              <PlusIcon />
             </Button>
-          )}
-          {connected ? (
-            <span className="label inline-flex min-w-0 items-center gap-s3" data-testid="controller-status" data-online={online}>
-              <span className={`size-2 shrink-0 rounded-full ${online ? "bg-success" : "bg-destructive"}`} aria-hidden />
-              <span className="truncate" title={machines.map((m) => m.id).join(", ")}>
-                {machines.length > 1 ? `${machines.length} computers` : online ? machines[0].id : "Controller offline"}
-              </span>
-            </span>
-          ) : (
-            <span className="label inline-flex items-center gap-s3" data-testid="connection-lost" role="status">
-              <span className="size-2 animate-pulse rounded-full bg-warning" aria-hidden />
-              Reconnecting…
-            </span>
-          )}
-          <Button variant="ghost" size="icon-sm" className="md:hidden" onClick={() => setNewOpen(true)} aria-label="New session" title="New session" data-testid="header-new-session">
-            <PlusIcon />
-          </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => signOut()} aria-label="Sign out" title="Sign out">
-            <LogOutIcon />
-          </Button>
-        </div>
-      </header>
+            <Button variant="ghost" size="icon-sm" onClick={() => signOut()} aria-label="Sign out" title="Sign out">
+              <LogOutIcon />
+            </Button>
+          </div>
+        </header>
 
-      <div className="flex min-h-0 flex-1 gap-s6">
-        <aside className="hidden w-[233px] shrink-0 overflow-y-auto overscroll-contain border-r py-s5 pr-s4 md:block">{list}</aside>
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col pt-s5">
+        <div className="flex min-h-0 flex-1 flex-col pt-s5">
           {selected ? (
             <SessionView key={selected.id} session={selected} onOpen={select} onDeleted={() => (location.hash = "")} />
+          ) : loading || selectedId ? (
+            <Empty>
+              <EmptyHeader>
+                <Spinner />
+                <EmptyTitle>{loading ? "Loading…" : "Opening session…"}</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           ) : (
-            <div className="flex flex-col gap-s4 overflow-y-auto py-s8">
-              <h1 className="text-title font-medium tracking-[-0.03em]">
-                {loading ? "Loading…" : selectedId ? "Opening session…" : "No sessions yet"}
-              </h1>
-              {!loading && !selectedId && (
-                <p className="max-w-[610px] text-lead text-muted-foreground">
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle className="text-title">No sessions yet</EmptyTitle>
+                <EmptyDescription>
                   Start one here, or run <code className="font-mono">seraph claude</code> in a terminal on your Mac.
-                </p>
-              )}
-              <Button className="w-fit rounded-full" onClick={() => setNewOpen(true)}>New session</Button>
-            </div>
+                </EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button className="rounded-full" onClick={() => setNewOpen(true)}>New session</Button>
+              </EmptyContent>
+            </Empty>
           )}
-        </main>
-      </div>
+        </div>
+      </SidebarInset>
 
-      {sendError && (
-        <p role="alert" className="fixed inset-x-s4 bottom-s4 z-50 mx-auto max-w-[610px] rounded-lg border border-destructive bg-background px-s4 py-s3 text-sm text-destructive">
-          {sendError}
-        </p>
-      )}
-
-      <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
-        <SheetContent side="left" className="w-[289px] p-s5">
-          <SheetTitle className="sr-only">Sessions</SheetTitle>
-          <div className="pt-s6">{list}</div>
-        </SheetContent>
-      </Sheet>
-
+      <Toaster position="bottom-center" />
       <NewSessionDialog
         open={newOpen}
         onOpenChange={setNewOpen}
@@ -154,6 +133,6 @@ export default function App() {
         machines={machines}
         onStarted={select}
       />
-    </div>
+    </SidebarProvider>
   )
 }

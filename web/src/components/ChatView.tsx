@@ -1,8 +1,20 @@
-import { ChevronRightIcon } from "lucide-react"
-import { useEffect, useMemo, useRef } from "react"
+import { useMemo } from "react"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Bubble, BubbleContent } from "@/components/ui/bubble"
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker"
+import { Message, MessageContent, MessageFooter } from "@/components/ui/message"
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller"
+import { Spinner } from "@/components/ui/spinner"
+import { Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceLine, TraceTitle } from "@/components/ui/trace"
 import { cn } from "@/lib/utils"
 import type { Command, MessageRow } from "@/lib/types"
 import { toolResults } from "@/lib/tools"
@@ -95,83 +107,119 @@ function unechoed(sent: Sent[], items: Item[], messages: MessageRow[]) {
   })
 }
 
+/** Something the person typed, on the right. */
+function Said({ children, mono, footer }: { children: React.ReactNode; mono?: boolean; footer?: React.ReactNode }) {
+  return (
+    <Message align="end" className="text-body">
+      <MessageContent>
+        <Bubble variant="secondary" align="end" className="max-w-[85%]">
+          <BubbleContent className={cn("text-body whitespace-pre-wrap", mono && "font-mono text-sm")}>{children}</BubbleContent>
+        </Bubble>
+        {footer}
+      </MessageContent>
+    </Message>
+  )
+}
+
+function Row({ item, results, cwd }: { item: Item; results: ReturnType<typeof toolResults>; cwd?: string }) {
+  switch (item.kind) {
+    case "user":
+      return <Said>{item.text}</Said>
+    case "command":
+      return <Said mono>{item.name === "!" ? `! ${item.args}` : `${item.name} ${item.args}`.trim()}</Said>
+    case "output":
+      return (
+        <pre className="max-h-80 overflow-auto rounded-md border px-s4 py-s3 font-mono text-sm whitespace-pre-wrap text-muted-foreground">{item.text}</pre>
+      )
+    case "assistant":
+      return (
+        <Message className="text-body">
+          <MessageContent>
+            <Prose text={item.text} />
+          </MessageContent>
+        </Message>
+      )
+    case "thinking":
+      return (
+        <Trace>
+          <TraceCollapsible>
+            <TraceCollapsibleTrigger>
+              <TraceLine>
+                <TraceTitle className="label">Thinking</TraceTitle>
+              </TraceLine>
+            </TraceCollapsibleTrigger>
+            <TraceCollapsibleContent className="text-sm whitespace-pre-wrap">{item.text}</TraceCollapsibleContent>
+          </TraceCollapsible>
+        </Trace>
+      )
+    case "tool":
+      return <ToolCard name={item.name} input={item.input} result={results.get(item.id)} cwd={cwd} />
+    case "divider":
+      return (
+        <Marker variant="separator" className="label">
+          <MarkerContent>{item.text}</MarkerContent>
+        </Marker>
+      )
+  }
+}
+
 export function ChatView({ messages, sent = [], working, loading, cwd }: { messages: MessageRow[]; sent?: Sent[]; working: boolean; loading: boolean; cwd?: string }) {
   const items = useMemo(() => toItems(messages), [messages])
   const pending = useMemo(() => unechoed(sent, items, messages), [sent, items, messages])
   const results = useMemo(() => toolResults(messages), [messages])
-  const bottom = useRef<HTMLDivElement>(null)
-  const stick = useRef(true)
-
-  // Follow new messages unless the person has scrolled up to read. The
-  // chat scrolls inside its own area (marked data-scroll), not the page.
-  const shown = items.length > 0 || pending.length > 0 || working
-  useEffect(() => {
-    const area = bottom.current?.closest<HTMLElement>("[data-scroll]")
-    if (!area) return
-    const onScroll = () => {
-      stick.current = area.scrollHeight - area.scrollTop - area.clientHeight < 200
-    }
-    area.addEventListener("scroll", onScroll, { passive: true })
-    return () => area.removeEventListener("scroll", onScroll)
-  }, [shown])
-  useEffect(() => {
-    const area = bottom.current?.closest<HTMLElement>("[data-scroll]")
-    if (area && stick.current) area.scrollTop = area.scrollHeight
-  }, [items.length, results.size, pending.length, shown])
 
   if (!items.length && !pending.length && !working) {
-    return <p className="py-s7 text-muted-foreground">{loading ? "Loading…" : "No messages yet. Send one below."}</p>
+    return (
+      <Empty>
+        <EmptyHeader>
+          {loading && <Spinner />}
+          <EmptyTitle className="font-normal text-muted-foreground">{loading ? "Loading…" : "No messages yet. Send one below."}</EmptyTitle>
+        </EmptyHeader>
+      </Empty>
+    )
   }
 
+  // Follows new messages unless the person has scrolled up to read.
   return (
-    <ol className="flex flex-col gap-s4 py-s5" data-testid="chat">
-      {items.map((item) => (
-        <li key={item.key} data-kind={item.kind}>
-          {item.kind === "user" && (
-            <div className="ml-auto w-fit max-w-[85%] rounded-lg bg-secondary px-s4 py-s3 whitespace-pre-wrap">{item.text}</div>
-          )}
-          {item.kind === "command" && (
-            <div className="ml-auto w-fit max-w-[85%] rounded-lg bg-secondary px-s4 py-s3 font-mono text-sm">
-              {item.name === "!" ? `! ${item.args}` : `${item.name} ${item.args}`.trim()}
-            </div>
-          )}
-          {item.kind === "output" && (
-            <pre className="max-h-80 overflow-auto rounded-md border px-s4 py-s3 font-mono text-sm whitespace-pre-wrap text-muted-foreground">
-              {item.text}
-            </pre>
-          )}
-          {item.kind === "assistant" && <Prose text={item.text} />}
-          {item.kind === "thinking" && (
-            <Collapsible>
-              <CollapsibleTrigger className="label group flex items-center gap-s2">
-                <ChevronRightIcon className="size-3 transition-transform group-data-[state=open]:rotate-90" /> Thinking
-              </CollapsibleTrigger>
-              <CollapsibleContent className="pt-s2 text-sm whitespace-pre-wrap text-muted-foreground">{item.text}</CollapsibleContent>
-            </Collapsible>
-          )}
-          {item.kind === "tool" && <ToolCard name={item.name} input={item.input} result={results.get(item.id)} cwd={cwd} />}
-          {item.kind === "divider" && <p className="label border-t pt-s3 text-center">{item.text}</p>}
-        </li>
-      ))}
-      {pending.map((c) => (
-        <li key={`sent-${c.id}`} data-kind="sent" data-testid="sent">
-          <div className="ml-auto w-fit max-w-[85%] rounded-lg bg-secondary px-s4 py-s3 whitespace-pre-wrap">
-            {String(c.payload.text)}
-            {Array.isArray(c.payload.images) && c.payload.images.length > 0 && (
-              <span className="label block pt-s2 normal-case">{c.payload.images.length} image{c.payload.images.length > 1 ? "s" : ""} attached</span>
+    <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+      <MessageScroller>
+        <MessageScrollerViewport aria-label="Conversation">
+          <MessageScrollerContent className="gap-s4 py-s5" data-testid="chat">
+            {items.map((item) => (
+              <MessageScrollerItem key={item.key} messageId={item.key} data-kind={item.kind}>
+                <Row item={item} results={results} cwd={cwd} />
+              </MessageScrollerItem>
+            ))}
+            {pending.map((c) => (
+              <MessageScrollerItem key={`sent-${c.id}`} messageId={`sent-${c.id}`} data-kind="sent" data-testid="sent">
+                <Said
+                  footer={
+                    <MessageFooter className={cn("label normal-case", c.status === "failed" && "text-destructive")}>
+                      {c.status === "pending" ? "Sending…" : c.status === "failed" ? `Failed: ${c.error}` : "Sent"}
+                    </MessageFooter>
+                  }
+                >
+                  {String(c.payload.text)}
+                  {Array.isArray(c.payload.images) && c.payload.images.length > 0 && (
+                    <span className="label block pt-s2 normal-case">{c.payload.images.length} image{c.payload.images.length > 1 ? "s" : ""} attached</span>
+                  )}
+                </Said>
+              </MessageScrollerItem>
+            ))}
+            {working && (
+              <MessageScrollerItem messageId="working">
+                <Marker className="label" data-testid="working">
+                  <MarkerIcon>
+                    <Spinner className="text-highlight" />
+                  </MarkerIcon>
+                  <MarkerContent>Working</MarkerContent>
+                </Marker>
+              </MessageScrollerItem>
             )}
-          </div>
-          <p className={cn("label pt-s1 text-right normal-case", c.status === "failed" && "text-destructive")}>
-            {c.status === "pending" ? "Sending…" : c.status === "failed" ? `Failed: ${c.error}` : "Sent"}
-          </p>
-        </li>
-      ))}
-      {working && (
-        <li className="label flex items-center gap-s3" data-testid="working">
-          <span className="size-2 animate-pulse rounded-full bg-highlight" /> Working
-        </li>
-      )}
-      <div ref={bottom} />
-    </ol>
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <MessageScrollerButton />
+      </MessageScroller>
+    </MessageScrollerProvider>
   )
 }

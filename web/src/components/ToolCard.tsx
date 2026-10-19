@@ -1,7 +1,8 @@
-import { CheckIcon, ChevronRightIcon, CircleIcon, LoaderIcon } from "lucide-react"
+import { CheckIcon, CircleIcon, LoaderIcon } from "lucide-react"
 import Markdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceDescription, TraceLine, TraceTitle } from "@/components/ui/trace"
+import { Item, ItemContent, ItemGroup, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { cn } from "@/lib/utils"
 import { diffLines, edits, resultText, shortPath, type DiffLine, type Todo, type ToolResult } from "@/lib/tools"
 type Input = Record<string, unknown>
@@ -31,22 +32,26 @@ export function Diff({ lines }: { lines: DiffLine[] }) {
 
 export function Todos({ todos }: { todos: Todo[] }) {
   return (
-    <ul className="flex flex-col gap-s2 text-sm" data-testid="todos">
+    <ItemGroup className="gap-0" data-testid="todos">
       {todos.map((t, k) => (
-        <li key={k} className="flex items-start gap-s3">
-          {t.status === "completed" ? (
-            <CheckIcon className="mt-0.5 size-4 shrink-0 text-success" aria-label="Done" />
-          ) : t.status === "in_progress" ? (
-            <LoaderIcon className="mt-0.5 size-4 shrink-0 text-highlight" aria-label="In progress" />
-          ) : (
-            <CircleIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-label="To do" />
-          )}
-          <span className={cn(t.status === "completed" && "text-muted-foreground line-through", t.status === "in_progress" && "font-medium")}>
-            {t.content}
-          </span>
-        </li>
+        <Item key={k} size="xs" className="px-0 py-s1">
+          <ItemMedia>
+            {t.status === "completed" ? (
+              <CheckIcon className="size-4 text-success" aria-label="Done" />
+            ) : t.status === "in_progress" ? (
+              <LoaderIcon className="size-4 text-highlight" aria-label="In progress" />
+            ) : (
+              <CircleIcon className="size-4 text-muted-foreground" aria-label="To do" />
+            )}
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle className={cn("font-normal", t.status === "completed" && "text-muted-foreground line-through", t.status === "in_progress" && "font-medium")}>
+              {t.content}
+            </ItemTitle>
+          </ItemContent>
+        </Item>
       ))}
-    </ul>
+    </ItemGroup>
   )
 }
 
@@ -120,12 +125,14 @@ export function ToolDetails({ name, input, result, cwd }: { name: string; input:
     return (
       <div className="flex flex-col gap-s3">
         {str(input, "subagent_type") && <p className="label">{str(input, "subagent_type")}</p>}
-        <Collapsible>
-          <CollapsibleTrigger className="label group flex items-center gap-s2">
-            <ChevronRightIcon className="size-3 transition-transform group-data-[state=open]:rotate-90" /> Instructions
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pt-s2 text-sm whitespace-pre-wrap text-muted-foreground">{str(input, "prompt")}</CollapsibleContent>
-        </Collapsible>
+        <TraceCollapsible>
+          <TraceCollapsibleTrigger>
+            <TraceLine>
+              <TraceTitle className="label">Instructions</TraceTitle>
+            </TraceLine>
+          </TraceCollapsibleTrigger>
+          <TraceCollapsibleContent className="text-sm whitespace-pre-wrap">{str(input, "prompt")}</TraceCollapsibleContent>
+        </TraceCollapsible>
         {result && (
           <div className={cn("text-sm", result.is_error && "text-destructive")} data-testid="agent-report">
             <Markdown remarkPlugins={[remarkGfm]}>{output || "(no report)"}</Markdown>
@@ -154,22 +161,25 @@ export function ToolDetails({ name, input, result, cwd }: { name: string; input:
 
 export function ToolCard({ name, input, result, cwd }: { name: string; input: Input; result?: ToolResult; cwd?: string }) {
   const { summary, note, isPath } = describe(name, input, cwd)
-  const status = !result ? "running" : result.is_error ? "error" : null
+  const status = !result ? "running" : result.is_error ? "error" : undefined
   return (
-    <Collapsible className="rounded-md border" data-testid="tool-card" data-tool={name}>
-      <CollapsibleTrigger className="group flex w-full min-w-0 items-center gap-s3 px-s4 py-s3 text-left text-sm">
-        <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform duration-[144ms] group-data-[state=open]:rotate-90" />
-        <span className="shrink-0 font-mono font-medium">{name}</span>
-        {/* Paths are cut from the left, so the file name stays visible. */}
-        <span className={cn("min-w-0 flex-1 truncate text-left font-mono text-muted-foreground", isPath && "[direction:rtl]")}>
-          <bdi>{summary}</bdi>
-        </span>
-        {note && <span className="shrink-0 font-mono text-xs text-muted-foreground">{note}</span>}
-        <span className={cn("shrink-0 label normal-case", status === "error" && "text-destructive")}>{status ?? "done"}</span>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="border-t px-s4 py-s3">
-        <ToolDetails name={name} input={input} result={result} cwd={cwd} />
-      </CollapsibleContent>
-    </Collapsible>
+    <Trace data-testid="tool-card" data-tool={name}>
+      <TraceCollapsible>
+        <TraceCollapsibleTrigger className="w-full">
+          <TraceLine status={status} className="min-w-0 flex-1 font-mono">
+            <span className="shrink-0 font-medium text-foreground">{name}</span>
+            {/* Paths are cut from the left, so the file name stays visible. */}
+            <TraceTitle className={cn("flex-1", isPath && "[direction:rtl]")}>
+              <bdi>{summary}</bdi>
+            </TraceTitle>
+            {note && <TraceDescription className="text-xs">{note}</TraceDescription>}
+            <TraceDescription className="label normal-case">{status ?? "done"}</TraceDescription>
+          </TraceLine>
+        </TraceCollapsibleTrigger>
+        <TraceCollapsibleContent className="text-foreground">
+          <ToolDetails name={name} input={input} result={result} cwd={cwd} />
+        </TraceCollapsibleContent>
+      </TraceCollapsible>
+    </Trace>
   )
 }

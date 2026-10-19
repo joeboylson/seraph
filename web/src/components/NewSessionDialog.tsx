@@ -2,7 +2,11 @@ import { ChevronUpIcon, FolderIcon, FolderPlusIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Field, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group"
 import { Input } from "@/components/ui/input"
+import { Item, ItemContent, ItemGroup, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { askDaemon } from "@/lib/commands"
@@ -115,21 +119,27 @@ export function NewSessionDialog({
           <DialogDescription>Starts Claude on {machines.length > 1 ? "the computer" : "your computer"} in the folder you pick.</DialogDescription>
         </DialogHeader>
 
-        {!online && <p className="text-sm text-destructive">The controller is offline. Run <code className="font-mono">seraph start</code> on your computer.</p>}
+        {!online && (
+          <Alert variant="destructive">
+            <AlertDescription>
+              The controller is offline. Run <code className="font-mono">seraph start</code> on your computer.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <div className="flex flex-col gap-s5">
           {machines.length > 1 && (
-            <label className="flex flex-col gap-s2">
-              <span className="label">Computer</span>
+            <Field>
+              <FieldLabel htmlFor="f-computer" className="label">Computer</FieldLabel>
               <Select value={machine?.id} onValueChange={(id) => { setChosen(id); setListing(null) }}>
-                <SelectTrigger className="w-full" data-testid="machine"><SelectValue /></SelectTrigger>
+                <SelectTrigger id="f-computer" className="w-full" data-testid="machine"><SelectValue /></SelectTrigger>
                 <SelectContent>{machines.map((m) => <SelectItem key={m.id} value={m.id}>{m.id}</SelectItem>)}</SelectContent>
               </Select>
-            </label>
+            </Field>
           )}
           {recent.length > 0 && (
-            <section>
-              <p className="label pb-s3">Recent</p>
+            <FieldSet>
+              <FieldLegend variant="label" className="label">Recent</FieldLegend>
               <div className="flex flex-wrap gap-s3">
                 {recent.map((path) => (
                   <Button key={path} variant="outline" size="sm" className="max-w-full rounded-full font-mono" onClick={() => browse(path)}>
@@ -137,76 +147,91 @@ export function NewSessionDialog({
                   </Button>
                 ))}
               </div>
-            </section>
+            </FieldSet>
           )}
 
-          <section>
-            <p className="label pb-s3">Folder</p>
-            <div className="rounded-lg border">
-              <div className="flex items-center gap-s3 border-b px-s4 py-s3">
-                <Button variant="ghost" size="icon-sm" disabled={!listing || listing.path === listing.parent} onClick={() => browse(listing?.parent)} aria-label="Up one folder">
+          <FieldSet className="gap-s3">
+            <FieldLegend variant="label" className="label">Folder</FieldLegend>
+            <InputGroup>
+              <InputGroupAddon>
+                <InputGroupButton size="icon-xs" disabled={!listing || listing.path === listing.parent} onClick={() => browse(listing?.parent)} aria-label="Up one folder">
                   <ChevronUpIcon />
-                </Button>
-                <Input
-                  value={cwd}
-                  onChange={(e) => setCwd(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault()
-                      browse(cwd)
-                    }
-                  }}
-                  onBlur={() => listing && cwd !== listing.path && browse(cwd)}
-                  className="h-8 border-0 px-s2 font-mono shadow-none focus-visible:ring-0"
-                  aria-label="Folder path"
-                  data-testid="cwd"
-                />
-              </div>
-              <ul className="max-h-56 overflow-y-auto py-s2" data-testid="folders">
-                {listing?.dirs.map((dir) => (
-                  <li key={dir}>
-                    <button type="button" className="flex w-full items-center gap-s3 px-s4 py-s2 text-left text-sm hover:bg-accent" onClick={() => browse(`${listing.path}/${dir}`)}>
-                      <FolderIcon className="size-4 text-muted-foreground" /> {dir}
-                    </button>
-                  </li>
-                ))}
-                {listing && !listing.dirs.length && <li className="px-s4 py-s2 text-sm text-muted-foreground">No folders here</li>}
-              </ul>
-              <div className="flex items-center gap-s3 border-t px-s4 py-s3">
-                <FolderPlusIcon className="size-4 shrink-0 text-muted-foreground" />
-                <Input value={newFolder} onChange={(e) => setNewFolder(e.target.value)} placeholder="New folder inside this one (optional)" className="h-8" data-testid="new-folder" />
-              </div>
-            </div>
-          </section>
+                </InputGroupButton>
+              </InputGroupAddon>
+              <InputGroupInput
+                value={cwd}
+                onChange={(e) => setCwd(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    browse(cwd)
+                  }
+                }}
+                onBlur={() => listing && cwd !== listing.path && browse(cwd)}
+                className="font-mono"
+                aria-label="Folder path"
+                data-testid="cwd"
+              />
+            </InputGroup>
+            {listing && (
+            <ItemGroup className="max-h-56 gap-0 overflow-y-auto rounded-lg border py-s2" data-testid="folders">
+              {listing.dirs.map((dir) => (
+                <Item key={dir} asChild size="xs" className="w-full rounded-none px-s4 hover:bg-accent">
+                  <button type="button" onClick={() => browse(`${listing.path}/${dir}`)}>
+                    <ItemMedia>
+                      <FolderIcon className="size-4 text-muted-foreground" />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle className="font-normal">{dir}</ItemTitle>
+                    </ItemContent>
+                  </button>
+                </Item>
+              ))}
+              {!listing.dirs.length && <p className="px-s4 py-s2 text-sm text-muted-foreground">No folders here</p>}
+            </ItemGroup>
+            )}
+            <InputGroup>
+              <InputGroupAddon>
+                <FolderPlusIcon />
+              </InputGroupAddon>
+              <InputGroupInput value={newFolder} onChange={(e) => setNewFolder(e.target.value)} placeholder="New folder inside this one (optional)" aria-label="New folder" data-testid="new-folder" />
+            </InputGroup>
+          </FieldSet>
 
           <div className="grid gap-s4 sm:grid-cols-2">
-            <label className="flex flex-col gap-s2">
-              <span className="label">Model</span>
+            <Field>
+              <FieldLabel htmlFor="f-model" className="label">Model</FieldLabel>
               <Select value={model} onValueChange={setModel}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectTrigger id="f-model" className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>{MODELS.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
               </Select>
-            </label>
-            <label className="flex flex-col gap-s2">
-              <span className="label">Permissions</span>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="f-permissions" className="label">Permissions</FieldLabel>
               <Select value={mode} onValueChange={setMode}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectTrigger id="f-permissions" className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>{MODES.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
               </Select>
-            </label>
+            </Field>
           </div>
 
-          <label className="flex flex-col gap-s2">
-            <span className="label">Name (optional)</span>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. landing page" data-testid="session-name" />
-          </label>
+          <Field>
 
-          <label className="flex flex-col gap-s2">
-            <span className="label">First message (optional)</span>
-            <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} placeholder="What should Claude do?" data-testid="first-prompt" />
-          </label>
+            <FieldLabel htmlFor="f-name-optional" className="label">Name (optional)</FieldLabel>
+            <Input id="f-name-optional" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. landing page" data-testid="session-name" />
+          </Field>
 
-          {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+          <Field>
+
+            <FieldLabel htmlFor="f-first-message-optional" className="label">First message (optional)</FieldLabel>
+            <Textarea id="f-first-message-optional" value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} placeholder="What should Claude do?" data-testid="first-prompt" />
+          </Field>
+
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
         </div>
 
         {/* Pinned so Start is always on screen while the form scrolls. */}

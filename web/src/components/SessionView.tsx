@@ -1,7 +1,22 @@
-import { ChevronRightIcon, PencilIcon, PowerIcon, RotateCcwIcon, Trash2Icon } from "lucide-react"
+import { PencilIcon, PowerIcon, RotateCcwIcon, Trash2Icon } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
+import { Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceDescription, TraceLine, TraceTitle } from "@/components/ui/trace"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useMessages, useSentPrompts, useSessionEvents } from "@/hooks/data"
 import { askDaemon, deleteSession, renameSession, sendCommand, sendKeys } from "@/lib/commands"
@@ -37,18 +52,80 @@ function PlanBar({ todos }: { todos: Todo[] }) {
   const current = todos.find((t) => t.status === "in_progress") ?? todos.find((t) => t.status === "pending")
   const done = todos.filter((t) => t.status === "completed").length
   return (
-    <Collapsible className="rounded-md border" data-testid="plan">
-      <CollapsibleTrigger className="group flex w-full min-w-0 items-center gap-s3 px-s4 py-s2 text-left text-sm">
-        <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform duration-[144ms] group-data-[state=open]:rotate-90" />
-        <span className="min-w-0 flex-1 truncate">{current?.status === "in_progress" ? current.activeForm ?? current.content : current?.content}</span>
-        <span className="shrink-0 font-mono text-xs text-muted-foreground">
-          {done}/{todos.length}
-        </span>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="max-h-[40dvh] overflow-auto border-t px-s4 py-s3">
-        <Todos todos={todos} />
-      </CollapsibleContent>
-    </Collapsible>
+    <Trace data-testid="plan">
+      <TraceCollapsible>
+        <TraceCollapsibleTrigger className="w-full">
+          <TraceLine status={current?.status === "in_progress" ? "running" : undefined} className="min-w-0 flex-1 text-foreground">
+            <TraceTitle className="flex-1">{current?.status === "in_progress" ? current.activeForm ?? current.content : current?.content}</TraceTitle>
+            <TraceDescription className="font-mono text-xs">
+              {done}/{todos.length}
+            </TraceDescription>
+          </TraceLine>
+        </TraceCollapsibleTrigger>
+        <TraceCollapsibleContent className="max-h-[40dvh] overflow-auto text-foreground">
+          <Todos todos={todos} />
+        </TraceCollapsibleContent>
+      </TraceCollapsible>
+    </Trace>
+  )
+}
+
+/** A button that asks before it acts. */
+function Confirm({ title, description, action, onConfirm, children }: { title: string; description?: string; action: string; onConfirm: () => void; children: React.ReactNode }) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>{children}</AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          {description && <AlertDialogDescription>{description}</AlertDialogDescription>}
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="rounded-full">Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" className="rounded-full" onClick={onConfirm} data-testid="confirm">
+            {action}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+function RenameButton({ session }: { session: Session }) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState("")
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (o) setName(session.name ?? sessionTitle(session))
+        setOpen(o)
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon-sm" className="-ml-s3 shrink-0 text-muted-foreground" aria-label="Rename session" title="Rename" data-testid="rename">
+          <PencilIcon />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-[377px]">
+        <form
+          className="flex flex-col gap-s4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            renameSession(session.id, name).catch(() => {})
+            setOpen(false)
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Rename session</DialogTitle>
+          </DialogHeader>
+          <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus aria-label="Session name" data-testid="rename-input" />
+          <DialogFooter>
+            <Button type="submit" className="rounded-full" data-testid="rename-save">Save</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -112,20 +189,7 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
       <header className="flex min-w-0 shrink-0 flex-col gap-s1 border-b pb-s4">
         <div className="flex min-w-0 items-center gap-s4">
           <h1 className="min-w-0 truncate text-title font-medium tracking-[-0.03em]" data-testid="session-title">{sessionTitle(session)}</h1>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="-ml-s3 shrink-0 text-muted-foreground"
-            onClick={() => {
-              const name = window.prompt("Rename session", session.name ?? sessionTitle(session))
-              if (name !== null) renameSession(session.id, name).catch(() => {})
-            }}
-            aria-label="Rename session"
-            title="Rename"
-            data-testid="rename"
-          >
-            <PencilIcon />
-          </Button>
+          <RenameButton session={session} />
           <StatusBadge status={session.status} className="shrink-0" />
         </div>
         {/* Cut from the left so the project folder stays visible. */}
@@ -134,9 +198,9 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
         </p>
         <p className="label" data-testid="session-meta">
           {session.model && !ended && !linked ? (
-            <button type="button" className="uppercase underline decoration-dotted underline-offset-4" onClick={() => sendCommand(session.id, "prompt", { text: "/model" })} title="Change model" data-testid="model">
+            <Button variant="link" className="label h-auto p-0 underline decoration-dotted" onClick={() => sendCommand(session.id, "prompt", { text: "/model" })} title="Change model" data-testid="model">
               {session.model}
-            </button>
+            </Button>
           ) : (
             session.model
           )}
@@ -150,7 +214,7 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
           <TabsList className="w-fit">
             <TabsTrigger value="chat">Chat</TabsTrigger>
             <TabsTrigger value="changes" data-testid="changes-tab">
-              Changes{changes.length > 0 && <span className="font-mono text-xs text-muted-foreground">{changes.length}</span>}
+              Changes{changes.length > 0 && <Badge variant="secondary" className="font-mono">{changes.length}</Badge>}
             </TabsTrigger>
             <TabsTrigger value="terminal" disabled={!mirror} data-testid="terminal-tab">Terminal</TabsTrigger>
           </TabsList>
@@ -167,31 +231,24 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
                 >
                   <span className="truncate">{modeLabel ?? "Mode"}</span>
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="rounded-full"
-                  onClick={() => confirm("End this session?") && sendCommand(session.id, "kill")}
-                  aria-label="End session"
-                  title="End session"
-                  data-testid="end-session"
-                >
-                  <PowerIcon /> <span className="hidden sm:inline">End</span>
-                </Button>
+                <Confirm title="End this session?" action="End session" onConfirm={() => sendCommand(session.id, "kill")}>
+                  <Button variant="outline" size="sm" className="rounded-full" aria-label="End session" title="End session" data-testid="end-session">
+                    <PowerIcon /> <span className="hidden sm:inline">End</span>
+                  </Button>
+                </Confirm>
               </>
             )}
             {ended && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-full"
-                onClick={() => confirm("Delete this session and its conversation from Supabase? The files Claude changed stay as they are.") && deleteSession(session.id).then(onDeleted, () => {})}
-                aria-label="Delete session"
-                title="Delete session"
-                data-testid="delete-session"
+              <Confirm
+                title="Delete this session?"
+                description="Its conversation is removed from Supabase. The files Claude changed stay as they are."
+                action="Delete"
+                onConfirm={() => deleteSession(session.id).then(onDeleted, () => {})}
               >
-                <Trash2Icon />
-              </Button>
+                <Button variant="outline" size="sm" className="rounded-full" aria-label="Delete session" title="Delete session" data-testid="delete-session">
+                  <Trash2Icon />
+                </Button>
+              </Confirm>
             )}
             {ended && session.claude_session_id && (
               <Button size="sm" className="rounded-full" onClick={resume} disabled={resuming} data-testid="resume">
@@ -200,13 +257,13 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
             )}
           </div>
         </div>
-        <TabsContent value="chat" className={SCROLL} data-scroll>
+        <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col">
           <ChatView messages={messages} sent={sent} working={session.status === "working"} loading={loading} cwd={session.cwd} />
         </TabsContent>
-        <TabsContent value="changes" className={SCROLL} data-scroll>
+        <TabsContent value="changes" className={SCROLL}>
           <ChangesView files={changes} cwd={session.cwd} />
         </TabsContent>
-        <TabsContent value="terminal" className={SCROLL} data-scroll>
+        <TabsContent value="terminal" className={SCROLL}>
           {mirror && <TerminalView mirror={mirror} sessionId={session.id} readOnly={ended} />}
         </TabsContent>
       </Tabs>
@@ -217,17 +274,23 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
           <PromptCard key={promptKey(prompt)} prompt={prompt} sessionId={session.id} permission={permission} mirror={mirror} cwd={session.cwd} />
         )}
         {!prompt && session.status === "waiting" && tab === "chat" && mirror && (
-          <p className="text-sm text-muted-foreground" data-testid="waiting-hint">
-            Claude is waiting on you.{" "}
-            <button type="button" className="underline underline-offset-4" onClick={() => setTab("terminal")}>Open the terminal</button>{" "}
-            to answer.
-          </p>
+          <Alert data-testid="waiting-hint">
+            <AlertDescription>
+              <span>
+                Claude is waiting on you.{" "}
+                <Button variant="link" className="h-auto p-0 text-sm underline" onClick={() => setTab("terminal")}>Open the terminal</Button> to answer.
+              </span>
+            </AlertDescription>
+          </Alert>
         )}
         {linked && !ended ? (
-          <p className="text-sm text-muted-foreground" data-testid="linked-note">
-            Read-only. To control this session from here, exit it and run{" "}
-            <code className="font-mono">seraph resume {session.claude_session_id?.slice(0, 8)}</code>
-          </p>
+          <Alert data-testid="linked-note">
+            <AlertDescription>
+              <span>
+                Read-only. To control this session from here, exit it and run <code className="font-mono">seraph resume {session.claude_session_id?.slice(0, 8)}</code>
+              </span>
+            </AlertDescription>
+          </Alert>
         ) : (
           <Composer sessionId={session.id} working={session.status === "working" || session.status === "waiting"} disabled={ended} />
         )}

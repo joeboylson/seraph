@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Item, ItemContent, ItemTitle } from "@/components/ui/item"
+import { Kbd } from "@/components/ui/kbd"
 import { sendKeys } from "@/lib/commands"
 import type { Prompt } from "@/lib/screen"
 import type { TerminalMirror } from "@/lib/terminal"
@@ -66,50 +69,58 @@ export function PromptCard({
   const disabled = state === "settling" || state === "sent"
   return (
     // Capped so the choices stay on screen; the card scrolls inside itself.
-    <section className="max-h-[70dvh] overflow-auto rounded-lg border border-highlight p-s4" data-testid="prompt-card" aria-label="Claude is asking">
-      <p className="label pb-s3">{prompt.choices.length ? "Claude is asking" : "Claude is showing"}</p>
-      {prompt.title && <h3 className="pb-s4 font-medium">{prompt.title}</h3>}
-      {toolName && toolInput && (
-        <div className="mb-s4 flex flex-col gap-s2 rounded-md border px-s4 py-s3" data-testid="prompt-tool">
-          <p className="font-mono text-sm">
-            <span className="font-medium">{toolName}</span>
-            {path && <span className="text-muted-foreground"> {shortPath(path, cwd)}</span>}
-          </p>
-          <ToolDetails name={toolName} input={toolInput} cwd={cwd} />
-        </div>
-      )}
-      {prompt.body && (
-        <pre className="mb-s4 max-h-72 overflow-auto rounded-md border px-s4 py-s3 font-mono text-sm whitespace-pre-wrap" data-testid="prompt-body">
-          {prompt.body.join("\n")}
-        </pre>
-      )}
-      <div className="flex flex-col gap-s3">
-        {prompt.choices.map((c) => (
+    <Card role="region" className="max-h-[70dvh] overflow-auto text-body ring-highlight" data-testid="prompt-card" aria-label="Claude is asking">
+      <CardHeader>
+        <CardDescription className="label">{prompt.choices.length ? "Claude is asking" : "Claude is showing"}</CardDescription>
+        {prompt.title && <CardTitle className="text-body font-medium">{prompt.title}</CardTitle>}
+      </CardHeader>
+      <CardContent className="flex flex-col gap-s4">
+        {toolName && toolInput && (
+          <Item variant="outline" className="flex-col items-stretch" data-testid="prompt-tool">
+            <ItemContent>
+              <ItemTitle className="font-mono">
+                {toolName}
+                {path && <span className="font-normal text-muted-foreground">{shortPath(path, cwd)}</span>}
+              </ItemTitle>
+            </ItemContent>
+            <ToolDetails name={toolName} input={toolInput} cwd={cwd} />
+          </Item>
+        )}
+        {prompt.body && (
+          <pre className="max-h-72 overflow-auto rounded-md border px-s4 py-s3 font-mono text-sm whitespace-pre-wrap" data-testid="prompt-body">
+            {prompt.body.join("\n")}
+          </pre>
+        )}
+        <div className="flex flex-col gap-s3">
+          {prompt.choices.map((c) => (
+            <Button
+              key={c.key}
+              variant={c.key === "1" ? "default" : "outline"}
+              className="h-auto justify-start rounded-lg px-s4 py-s3 text-left whitespace-normal"
+              onClick={() => press(c.keys)}
+              disabled={disabled}
+              data-testid="prompt-choice"
+            >
+              <Kbd>{c.key}</Kbd>
+              <span>{c.label}</span>
+            </Button>
+          ))}
           <Button
-            key={c.key}
-            variant={c.key === "1" ? "default" : "outline"}
-            className="h-auto justify-start rounded-lg px-s4 py-s3 text-left whitespace-normal"
-            onClick={() => press(c.keys)}
+            variant={prompt.choices.length ? "ghost" : "default"}
+            className="w-fit rounded-full"
             disabled={disabled}
-            data-testid="prompt-choice"
+            onClick={() => press(["Escape"])}
+            data-testid="prompt-escape"
           >
-            <span className="font-mono text-xs opacity-70">{c.key}</span>
-            <span>{c.label}</span>
+            {prompt.choices.length ? "Cancel" : "Close"} <Kbd>Esc</Kbd>
           </Button>
-        ))}
-        <Button
-          variant={prompt.choices.length ? "ghost" : "default"}
-          className="w-fit rounded-full"
-          disabled={disabled}
-          onClick={() => press(["Escape"])}
-          data-testid="prompt-escape"
-        >
-          {prompt.choices.length ? "Cancel (Esc)" : "Close (Esc)"}
-        </Button>
-      </div>
-      <p className="pt-s3 text-sm text-muted-foreground" data-testid="prompt-state" data-state={state}>
-        {state === "sent" ? "Sent…" : state === "retry" ? "That didn't go through. Try again." : prompt.hint}
-      </p>
-    </section>
+        </div>
+      </CardContent>
+      <CardFooter>
+        <p className="text-sm text-muted-foreground" data-testid="prompt-state" data-state={state}>
+          {state === "sent" ? "Sent…" : state === "retry" ? "That didn't go through. Try again." : prompt.hint}
+        </p>
+      </CardFooter>
+    </Card>
   )
 }

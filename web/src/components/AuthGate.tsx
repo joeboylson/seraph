@@ -1,6 +1,7 @@
 import type { Session } from "@supabase/supabase-js"
 import { lazy, Suspense, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Login } from "@/components/Login"
 import { signOut } from "@/lib/push"
 import { db } from "@/lib/supabase"
@@ -38,23 +39,29 @@ export function AuthGate() {
       </Suspense>
     )
   return (
-    <main className="mx-auto flex max-w-[610px] flex-col gap-s4 px-s5 py-s8">
-      <p className="label">{state.kind === "error" ? "Can't connect" : "Not allowed"}</p>
-      <h1 className="text-title font-medium tracking-[-0.03em]">
-        {state.kind === "error" ? "Couldn't check your account" : `${state.email ?? "This account"} can't use this page`}
-      </h1>
-      <p className="text-lead text-muted-foreground">
-        {state.kind === "error" ? (
-          state.message
-        ) : (
-          <>
-            On your computer, run <code className="font-mono">seraph user add {state.email}</code>, then sign in again.
-          </>
-        )}
-      </p>
-      <Button variant="outline" className="w-fit rounded-full" onClick={() => signOut()}>
-        Sign out
-      </Button>
-    </main>
+    <Empty className="min-h-dvh">
+      <EmptyHeader className="max-w-[610px]">
+        <p className="label">{state.kind === "error" ? "Can't connect" : "Not allowed"}</p>
+        <EmptyTitle>
+          <h1 className="text-title font-medium tracking-[-0.03em]">
+            {state.kind === "error" ? "Couldn't check your account" : `${state.email ?? "This account"} can't use this page`}
+          </h1>
+        </EmptyTitle>
+        <EmptyDescription className="text-lead">
+          {state.kind === "error" ? (
+            state.message
+          ) : (
+            <>
+              On your computer, run <code className="font-mono">seraph user add {state.email}</code>, then sign in again.
+            </>
+          )}
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button variant="outline" className="rounded-full" onClick={() => signOut()}>
+          Sign out
+        </Button>
+      </EmptyContent>
+    </Empty>
   )
 }

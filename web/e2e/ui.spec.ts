@@ -73,7 +73,7 @@ test("slash commands are suggested and sent", async ({ page }) => {
   const menu = page.getByRole("listbox", { name: "Commands" })
   await expect(menu).toContainText("/compact")
   await expect(menu).toContainText("/context")
-  await menu.getByRole("button", { name: /\/compact/ }).click()
+  await menu.getByRole("option", { name: /\/compact/ }).click()
   await expectCommand(session.id, "prompt", (p) => p.text === "/compact")
 })
 
@@ -291,14 +291,15 @@ test("Claude's todo list shows above the message box, and the header shows conte
 test("a session can be renamed, and an ended one deleted with its conversation", async ({ page }) => {
   await addMessages(session.id, [{ type: "user", message: { role: "user", content: "hello" } }])
   await page.goto(`/#/s/${session.id}`)
-  page.once("dialog", (d) => d.accept("Renamed from the phone"))
   await page.getByTestId("rename").click()
+  await page.getByTestId("rename-input").fill("Renamed from the phone")
+  await page.getByTestId("rename-save").click()
   await expect(page.getByTestId("session-title")).toHaveText("Renamed from the phone")
 
   await db.from("sessions").update({ status: "ended", ended_at: new Date().toISOString() }).eq("id", session.id)
   await expect(page.getByTestId("delete-session")).toBeVisible()
-  page.once("dialog", (d) => d.accept())
   await page.getByTestId("delete-session").click()
+  await page.getByTestId("confirm").click()
   await expect.poll(async () => (await db.from("messages").select("id").eq("session_id", session.id)).data?.length).toBe(0)
   await expect(page.getByText("Renamed from the phone")).toHaveCount(0)
 })
@@ -307,7 +308,7 @@ test("the session list can be searched", async ({ page }) => {
   const others = await Promise.all(Array.from({ length: 9 }, (_, i) => fakeSession({ name: `filler ${i}`, status: "ended" })))
   try {
     await page.goto(`/#/s/${session.id}`)
-    const list = page.getByRole("complementary")
+    const list = page.getByRole("navigation", { name: "Sessions" })
     await list.getByTestId("session-search").fill(session.name)
     await expect(list.getByTestId("session-item")).toHaveCount(1)
     await expect(list.getByTestId("session-item")).toContainText(session.name)
@@ -392,7 +393,7 @@ test("with two computers, the page names them and sends requests only to the one
   try {
     await page.goto(`/#/s/${session.id}`)
     await expect(page.getByTestId("controller-status")).toContainText("2 computers")
-    await page.getByRole("complementary").getByTestId("new-session").click()
+    await page.getByRole("navigation", { name: "Sessions" }).getByTestId("new-session").click()
     const picker = page.getByTestId("machine")
     await expect(picker).toBeVisible()
     await picker.click()
@@ -422,8 +423,9 @@ test("two devices on one session see each other's changes live", async ({ page, 
     await phone.goto(`/#/s/${session.id}`)
     await expect(phone.getByTestId("session-title")).toHaveText(session.name)
 
-    page.once("dialog", (d) => d.accept("Shared name"))
     await page.getByTestId("rename").click()
+    await page.getByTestId("rename-input").fill("Shared name")
+    await page.getByTestId("rename-save").click()
     await expect(phone.getByTestId("session-title")).toHaveText("Shared name")
 
     await phone.getByTestId("composer").fill("sent from the phone")
@@ -440,7 +442,7 @@ test("the sidebar lists devices, online first, and opens one to show its session
   const onB = await fakeSession({ name: "on box b", hostname: "box-b" })
   try {
     await page.goto(`/#/s/${onA.id}`)
-    const list = page.getByRole("complementary")
+    const list = page.getByRole("navigation", { name: "Sessions" })
     // The open session's device is shown first, with names only and no folders.
     await expect(list.getByTestId("device-name")).toHaveText("box-a")
     await expect(list.getByTestId("session-item")).toHaveText(/on box a/)
@@ -470,7 +472,7 @@ test("ended sessions are folded away until opened", async ({ page }) => {
   const old = await fakeSession({ name: "an old one", status: "ended", ended_at: new Date().toISOString() })
   try {
     await page.goto(`/#/s/${session.id}`)
-    const list = page.getByRole("complementary")
+    const list = page.getByRole("navigation", { name: "Sessions" })
     await expect(list.getByTestId("ended-toggle")).toContainText("Ended (")
     await expect(list.getByText("an old one")).toHaveCount(0)
     await list.getByTestId("ended-toggle").click()
@@ -523,7 +525,7 @@ for (const size of ["desktop", "phone"] as const) {
     await expect(page.getByText("Seraph", { exact: true })).toBeInViewport()
     await expect(page.getByTestId("session-title")).toBeInViewport()
     await expect(page.getByTestId("composer")).toBeInViewport()
-    if (size === "desktop") await expect(page.getByRole("complementary").getByTestId("new-session")).toBeInViewport()
+    if (size === "desktop") await expect(page.getByRole("navigation", { name: "Sessions" }).getByTestId("new-session")).toBeInViewport()
     // Scrolling the chat back up moves only the chat.
     await page.getByTestId("chat").getByText("Line 1 of a long reply").scrollIntoViewIfNeeded()
     await expect(page.getByTestId("chat").getByText("Line 1 of a long reply")).toBeInViewport()
