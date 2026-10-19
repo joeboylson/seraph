@@ -24,7 +24,7 @@ or a Supabase project. Building from the repo also needs
 [Rust](https://rustup.rs) and Node 18+.
 
 ```sh
-git clone <this repo> seraph && cd seraph
+git clone https://github.com/joeboylson/seraph.git && cd seraph
 ./install.sh              # builds seraph, page included, into ~/.local/bin
 seraph setup              # connect to Supabase: local Docker, or your own project
 seraph user add <email>   # let yourself sign in to the page
