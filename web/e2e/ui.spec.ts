@@ -672,3 +672,35 @@ test("up to five sessions pin as tabs at the top and switch with a tap", async (
     await Promise.all(others.map((o) => removeSession(o.id)))
   }
 })
+
+test("Claude's questions show as a card, and answering types the right keys", async ({ page }) => {
+  const questions = [
+    { question: "Which pet?", header: "Pet", multiSelect: false, options: [{ label: "Cat" }, { label: "Dog" }] },
+    { question: "Which sizes?", header: "Sizes", multiSelect: true, options: [{ label: "Small" }, { label: "Medium" }, { label: "Large" }] },
+  ]
+  await page.goto(`/#/s/${session.id}`)
+  await expectCommand(session.id, "replay")
+  await db.from("events").insert({
+    session_id: "claude-1",
+    csc_session: session.id,
+    hook_event: "PreToolUse",
+    payload: { tool_name: "AskUserQuestion", tool_use_id: "tu_q1", tool_input: { questions } },
+  })
+  const card = page.getByTestId("question-card")
+  await expect(card).toContainText("Which pet?")
+  await card.getByTestId("question-other").click()
+  await card.getByTestId("question-other-text").fill("A parrot")
+  await card.getByRole("button", { name: "Next" }).click()
+  await card.getByTestId("question-option").filter({ hasText: "Small" }).click()
+  await card.getByTestId("question-option").filter({ hasText: "Large" }).click()
+  await card.getByTestId("question-submit").click()
+
+  // "Type something" is option 3: pick it, type, Enter; then tick 1 and 3, Tab; then submit.
+  await expect
+    .poll(async () => (await db.from("commands").select("payload").eq("session_id", session.id).eq("kind", "keys").order("id")).data?.map((c) => c.payload))
+    .toEqual([{ keys: ["3"] }, { data: "A parrot" }, { keys: ["Enter"] }, { keys: ["1", "3", "Tab"] }, { keys: ["1"] }])
+
+  // Once Claude has the answer, the card goes.
+  await db.from("events").insert({ session_id: "claude-1", csc_session: session.id, hook_event: "PostToolUse", payload: { tool_name: "AskUserQuestion", tool_use_id: "tu_q1" } })
+  await expect(card).toHaveCount(0)
+})

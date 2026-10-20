@@ -103,7 +103,7 @@ export function Composer({ sessionId, working, disabled, paused }: { sessionId: 
 
   return (
     <form
-      className="relative flex flex-col gap-s3"
+      className="relative flex shrink-0 flex-col gap-s3"
       onSubmit={(e) => {
         e.preventDefault()
         send()

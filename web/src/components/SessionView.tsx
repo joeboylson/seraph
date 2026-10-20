@@ -24,12 +24,14 @@ import { useMessages, useSentPrompts, useSessionEvents } from "@/hooks/data"
 import { askDaemon, deleteSession, endPaused, pauseSession, renameSession, sendCommand, sendKeys } from "@/lib/commands"
 import { readMode, readPrompt, type Prompt } from "@/lib/screen"
 import { dropMirror, getMirror } from "@/lib/terminal"
+import { pendingQuestions } from "@/lib/questions"
 import { contextTokens, fileChanges, latestTodos, shortPath, type Todo } from "@/lib/tools"
 import type { Session } from "@/lib/types"
 import { ChangesView } from "./ChangesView"
 import { ChatView } from "./ChatView"
 import { Composer } from "./Composer"
 import { PromptCard, promptKey } from "./PromptCard"
+import { QuestionCard } from "./QuestionCard"
 import { sessionTitle } from "./SessionList"
 import { StatusBadge, shownStatus } from "./StatusBadge"
 import { TerminalView } from "./TerminalView"
@@ -281,6 +283,9 @@ export function SessionView({
     }
   }
 
+  // Claude's AskUserQuestion gets a card built from the questions themselves;
+  // its terminal menu isn't one the screen reader below can follow.
+  const asking = useMemo(() => (ended ? null : pendingQuestions(events)), [ended, events])
   const todos = useMemo(() => latestTodos(messages), [messages])
   const context = useMemo(() => contextTokens(messages), [messages])
   const changes = useMemo(() => fileChanges(messages), [messages])
@@ -325,7 +330,8 @@ export function SessionView({
         <UsageBars usage={session.usage} />
       </header>
 
-      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0">
+      {/* Keeps its tab row and a strip of chat; a tall card below scrolls instead. */}
+      <Tabs value={tab} onValueChange={setTab} className="flex min-h-[144px] flex-1 flex-col gap-0">
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-s3 pt-s4">
           <TabsList className="w-fit">
             <TabsTrigger value="chat">Chat</TabsTrigger>
@@ -394,12 +400,15 @@ export function SessionView({
         </TabsContent>
       </Tabs>
 
-      <div className="flex shrink-0 flex-col gap-s3 border-t bg-background pt-s3 pb-[max(var(--spacing-s4),env(safe-area-inset-bottom))]">
-        {todos && !ended && !prompt && todos.some((t) => t.status !== "completed") && tab === "chat" && <PlanBar todos={todos} />}
-        {prompt && mirror && tab === "chat" && (
+      <div className="flex min-h-0 shrink flex-col gap-s3 border-t bg-background pt-s3 pb-[max(var(--spacing-s4),env(safe-area-inset-bottom))]">
+        {todos && !ended && !prompt && !asking && todos.some((t) => t.status !== "completed") && tab === "chat" && <PlanBar todos={todos} />}
+        {asking && mirror && tab === "chat" && (
+          <QuestionCard key={asking.id} sessionId={session.id} questions={asking.questions} onOpenTerminal={() => setTab("terminal")} />
+        )}
+        {!asking && prompt && mirror && tab === "chat" && (
           <PromptCard key={promptKey(prompt)} prompt={prompt} sessionId={session.id} permission={permission} mirror={mirror} cwd={session.cwd} />
         )}
-        {!prompt && session.status === "waiting" && tab === "chat" && mirror && (
+        {!prompt && !asking && session.status === "waiting" && tab === "chat" && mirror && (
           <Alert data-testid="waiting-hint">
             <AlertDescription>
               <span>

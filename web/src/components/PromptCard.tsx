@@ -69,7 +69,7 @@ export function PromptCard({
   const disabled = state === "settling" || state === "sent"
   return (
     // Capped so the choices stay on screen; the card scrolls inside itself.
-    <Card role="region" className="max-h-[70dvh] overflow-auto text-body ring-highlight" data-testid="prompt-card" aria-label="Claude is asking">
+    <Card role="region" className="max-h-[70dvh] min-h-0 shrink overflow-auto text-body ring-highlight" data-testid="prompt-card" aria-label="Claude is asking">
       <CardHeader>
         <CardDescription className="label">{prompt.choices.length ? "Claude is asking" : "Claude is showing"}</CardDescription>
         {prompt.title && <CardTitle className="text-body font-medium">{prompt.title}</CardTitle>}
