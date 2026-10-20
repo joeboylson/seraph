@@ -24,8 +24,7 @@ or a Supabase project. Building from the repo also needs
 [Rust](https://rustup.rs) and Node 18+.
 
 ```sh
-git clone https://github.com/joeboylson/seraph.git && cd seraph
-./install.sh              # builds seraph into ~/.local/bin
+curl -fsSL https://raw.githubusercontent.com/joeboylson/seraph/main/install.sh | sh
 seraph setup              # connect to Supabase: local Docker, or your own project
 seraph user add <email>   # let yourself sign in to the page
 seraph start              # run the controller in the background
@@ -104,11 +103,26 @@ folder. Details in [docs/supabase.md](docs/supabase.md).
 
 ## Installing and updating
 
-`seraph` is one program with the page built in. In the repo:
+`seraph` is one program. Install or update it (on macOS or Linux, Apple
+Silicon, Intel or ARM) with:
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/joeboylson/seraph/main/install.sh | sh
+```
+
+It downloads the latest release built for the computer and checks it
+against its checksum; `SERAPH_VERSION=v0.2.0` picks a release. A running
+controller restarts onto the new copy; Claude sessions keep running.
+
+From a copy of the repo, the same script builds it from the code there:
+
+```sh
+git clone https://github.com/joeboylson/seraph.git && cd seraph
 ./install.sh              # install, or update after a change; restarts the controller
 ```
+
+Pushing a tag like `v0.3.0` builds every platform and publishes the
+release ([.github/workflows/release.yml](.github/workflows/release.yml)).
 
 On your other computers of the same kind (e.g. another Apple Silicon Mac),
 install or update straight from a computer that runs the controller:
