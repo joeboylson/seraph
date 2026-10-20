@@ -78,7 +78,8 @@ fn start_fields() -> &'static [(&'static str, Regex)] {
     })
 }
 
-fn start_session(payload: &Value) -> Result<Value> {
+/// Check what the page sent against `start_fields`.
+fn check_fields(payload: &Value) -> Result<()> {
     for (field, pattern) in start_fields() {
         match &payload[*field] {
             Value::Null => {}
@@ -86,6 +87,38 @@ fn start_session(payload: &Value) -> Result<Value> {
             _ => bail!("invalid {field}"),
         }
     }
+    Ok(())
+}
+
+/// Run `seraph claude` for session `session_id` in `cwd`, in the background,
+/// with the options in `payload` (already checked).
+fn spawn_wrapper(session_id: &str, cwd: &Path, payload: &Value) -> Result<()> {
+    let size = payload["size"].as_str().unwrap_or("120x40");
+    let mut argv = vec!["claude".to_string(), "--seraph-headless".into(), "--seraph-id".into(), session_id.to_string(), "--seraph-size".into(), size.into()];
+    for (field, flag) in [("name", "--name"), ("permission_mode", "--permission-mode"), ("model", "--model"), ("resume", "--resume")] {
+        if let Some(v) = payload[field].as_str() {
+            argv.push(flag.into());
+            argv.push(v.into());
+        }
+    }
+    let log_file = OpenOptions::new().create(true).append(true).open(config::log_path())?;
+    let mut child = detach(
+        Command::new(config::exe())
+            .args(&argv)
+            .current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(log_file.try_clone()?)
+            .stderr(log_file),
+    )
+    .spawn()?;
+    // Collect it when it exits, or it stays a zombie that looks alive
+    // (which a restart waits on) until the controller itself stops.
+    thread::spawn(move || child.wait());
+    Ok(())
+}
+
+fn start_session(payload: &Value) -> Result<Value> {
+    check_fields(payload)?;
     let cwd_raw = payload["cwd"].as_str().ok_or_else(|| anyhow!("missing cwd"))?;
     let expanded = config::expand(cwd_raw);
     if payload["create"] == true {
@@ -103,24 +136,7 @@ fn start_session(payload: &Value) -> Result<Value> {
         &json!({ "id": session_id, "name": payload["name"], "cwd": cwd, "hostname": config::machine(), "mode": "headless" }),
         "return=minimal",
     )?;
-    let size = payload["size"].as_str().unwrap_or("120x40");
-    let mut argv = vec!["claude".to_string(), "--seraph-headless".into(), "--seraph-id".into(), session_id.clone(), "--seraph-size".into(), size.into()];
-    for (field, flag) in [("name", "--name"), ("permission_mode", "--permission-mode"), ("model", "--model"), ("resume", "--resume")] {
-        if let Some(v) = payload[field].as_str() {
-            argv.push(flag.into());
-            argv.push(v.into());
-        }
-    }
-    let log_file = OpenOptions::new().create(true).append(true).open(config::log_path())?;
-    detach(
-        Command::new(config::exe())
-            .args(&argv)
-            .current_dir(&cwd)
-            .stdin(Stdio::null())
-            .stdout(log_file.try_clone()?)
-            .stderr(log_file),
-    )
-    .spawn()?;
+    spawn_wrapper(&session_id, &cwd, payload)?;
     if let Some(prompt) = payload["prompt"].as_str() {
         // Waits in the queue until the new session is ready for it.
         insert(
@@ -130,6 +146,70 @@ fn start_session(payload: &Value) -> Result<Value> {
         )?;
     }
     Ok(json!({ "session_id": session_id, "cwd": cwd }))
+}
+
+/// Restart a session started from the page: end its Claude, wait for it to
+/// exit, then start Claude again in the same session, resuming the same
+/// conversation. The session keeps its id, so the page stays on it.
+fn restart_session(payload: &Value) -> Result<Value> {
+    let id = payload["session_id"].as_str().unwrap_or_default().to_string();
+    if !Regex::new(r"^[0-9a-f-]{36}$").expect("valid pattern").is_match(&id) {
+        bail!("invalid session_id");
+    }
+    let rows = select_rows("sessions", &format!("id=eq.{id}&select=cwd,name,model,permission_mode,claude_session_id,mode,status,hostname,pid,cols,rows"))?;
+    let row = rows.first().ok_or_else(|| anyhow!("no such session"))?.clone();
+    if row["mode"] != "headless" {
+        bail!("Only sessions started from the page can be restarted here. This one belongs to a terminal; restart it there.");
+    }
+    if row["hostname"].as_str() != Some(config::machine().as_str()) {
+        bail!("This session runs on another computer.");
+    }
+    let cwd = PathBuf::from(row["cwd"].as_str().unwrap_or_default());
+    if !cwd.is_dir() {
+        bail!("its folder is gone: {}", cwd.display());
+    }
+    let size = match (row["cols"].as_u64(), row["rows"].as_u64()) {
+        (Some(c), Some(r)) => Value::from(format!("{c}x{r}")),
+        _ => Value::Null,
+    };
+    // Claude saves a conversation only once something is said, and
+    // `--resume` quits if there's none: with no messages yet, start fresh.
+    let said = !select_rows("messages", &format!("session_id=eq.{id}&select=id&limit=1"))?.is_empty();
+    let options = json!({
+        "name": row["name"],
+        "model": row["model"],
+        "permission_mode": row["permission_mode"],
+        "resume": if said { row["claude_session_id"].clone() } else { Value::Null },
+        "size": size,
+    });
+    check_fields(&options)?;
+    // Waiting can take a while; answer the page now and finish in the background.
+    thread::spawn(move || {
+        if let Err(e) = finish_restart(&id, &row, &cwd, &options) {
+            log(format!("restart {id}: {e}"));
+        }
+    });
+    Ok(json!({ "session_id": payload["session_id"] }))
+}
+
+fn finish_restart(id: &str, row: &Value, cwd: &Path, options: &Value) -> Result<()> {
+    if row["status"] != "ended" {
+        insert("commands", &json!({ "session_id": id, "kind": "kill" }), "return=minimal")?;
+        let pid = row["pid"].as_i64().map(|p| p as i32);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            thread::sleep(Duration::from_millis(500));
+            let ended = select_rows("sessions", &format!("id=eq.{id}&select=status"))?.first().is_some_and(|r| r["status"] == "ended");
+            if ended && !pid.is_some_and(process_alive) {
+                break;
+            }
+            if Instant::now() > deadline {
+                bail!("Claude didn't exit within 30 seconds");
+            }
+        }
+    }
+    update("sessions", &format!("id=eq.{id}"), &json!({ "status": "starting", "ended_at": null, "updated_at": now() }))?;
+    spawn_wrapper(id, cwd, options)
 }
 
 /// Mark a request as ours. Only one controller's update finds it still pending.
@@ -148,6 +228,7 @@ fn handle(cmd: &Value) -> Result<Value> {
     match cmd["kind"].as_str().unwrap_or("") {
         "list_dirs" => list_dirs(payload["path"].as_str()),
         "start_session" => start_session(payload),
+        "restart_session" => restart_session(payload),
         other => bail!("unknown command: {other}"),
     }
 }

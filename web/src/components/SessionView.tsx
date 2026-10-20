@@ -1,5 +1,6 @@
-import { PencilIcon, PowerIcon, RotateCcwIcon, Trash2Icon } from "lucide-react"
+import { PencilIcon, PowerIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+import { toast } from "sonner"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,7 +22,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useMessages, useSentPrompts, useSessionEvents } from "@/hooks/data"
 import { askDaemon, deleteSession, renameSession, sendCommand, sendKeys } from "@/lib/commands"
 import { readMode, readPrompt, type Prompt } from "@/lib/screen"
-import { getMirror } from "@/lib/terminal"
+import { dropMirror, getMirror } from "@/lib/terminal"
 import { contextTokens, fileChanges, latestTodos, shortPath, type Todo } from "@/lib/tools"
 import type { Session } from "@/lib/types"
 import { ChangesView } from "./ChangesView"
@@ -135,6 +136,9 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
   // A linked session is followed through its transcript only: there's no
   // terminal to mirror or type into.
   const linked = session.mode === "linked"
+  // Only sessions started from the page can be restarted from it; a terminal's
+  // session belongs to that terminal.
+  const headless = session.mode === "headless"
   const { messages, loading } = useMessages(session.id)
   const events = useSessionEvents(session.id)
   const sent = useSentPrompts(session.id)
@@ -165,18 +169,35 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
   const lastPermission = [...events].reverse().find((e) => e.hook_event === "PermissionRequest" || e.hook_event === "PostToolUse")
   const permission = lastPermission?.hook_event === "PermissionRequest" ? lastPermission : undefined
 
+  // A restarted session's Claude starts its screen afresh; don't keep the old one.
+  useEffect(() => {
+    if (ended) dropMirror(session.id)
+  }, [ended, session.id])
+
   async function resume() {
     setResuming(true)
     try {
       // On the computer the session ran on: that's where its folder and history are.
+      // One started from the page carries on in place; one from a terminal
+      // continues as a new session started from the page.
       const { session_id } = await askDaemon<{ session_id: string }>(
-        "start_session",
-        { cwd: session.cwd, resume: session.claude_session_id, name: session.name },
+        headless ? "restart_session" : "start_session",
+        headless ? { session_id: session.id } : { cwd: session.cwd, resume: session.claude_session_id, name: session.name },
         session.hostname ?? "",
       )
       onOpen(session_id)
+    } catch (e) {
+      toast.error((e as Error).message)
     } finally {
       setResuming(false)
+    }
+  }
+
+  async function restart() {
+    try {
+      await askDaemon("restart_session", { session_id: session.id }, session.hostname ?? "")
+    } catch (e) {
+      toast.error(`Couldn't restart: ${(e as Error).message}`)
     }
   }
 
@@ -233,6 +254,18 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
                 >
                   <span className="truncate">{modeLabel ?? "Mode"}</span>
                 </Button>
+                {headless && (
+                  <Confirm
+                    title="Restart this session?"
+                    description="Claude stops, then starts again in the same folder and picks the conversation back up. Anything it's in the middle of is lost."
+                    action="Restart"
+                    onConfirm={restart}
+                  >
+                    <Button variant="outline" size="sm" className="rounded-full" aria-label="Restart session" title="Restart session" data-testid="restart-session">
+                      <RotateCwIcon /> <span className="hidden sm:inline">Restart</span>
+                    </Button>
+                  </Confirm>
+                )}
                 <Confirm title="End this session?" action="End session" onConfirm={() => sendCommand(session.id, "kill")}>
                   <Button variant="outline" size="sm" className="rounded-full" aria-label="End session" title="End session" data-testid="end-session">
                     <PowerIcon /> <span className="hidden sm:inline">End</span>
@@ -252,7 +285,7 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
                 </Button>
               </Confirm>
             )}
-            {ended && session.claude_session_id && (
+            {ended && (session.claude_session_id || headless) && (
               <Button size="sm" className="rounded-full" onClick={resume} disabled={resuming} data-testid="resume">
                 <RotateCcwIcon /> {resuming ? "Resuming…" : "Resume"}
               </Button>

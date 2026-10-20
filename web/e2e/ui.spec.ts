@@ -548,3 +548,21 @@ test("the header shows context and plan usage from Claude's status line, live", 
   await expect(page.getByTestId("usage-five-hour")).toContainText("resets")
   await expect(page.getByTestId("usage-weekly")).toContainText("12%")
 })
+
+test("a session started from the page can be restarted in place; a terminal's can't", async ({ page }) => {
+  await db.from("sessions").update({ hostname: "test-box" }).eq("id", session.id)
+  await page.goto(`/#/s/${session.id}`)
+  await page.getByTestId("restart-session").click()
+  await page.getByTestId("confirm").click()
+  await expect
+    .poll(async () => {
+      const { data } = await db.from("commands").select("payload").eq("kind", "restart_session").eq("target", "test-box")
+      return data?.map((c) => c.payload.session_id)
+    })
+    .toEqual([session.id])
+  await db.from("commands").delete().eq("target", "test-box")
+
+  await db.from("sessions").update({ mode: "wrapped" }).eq("id", session.id)
+  await expect(page.getByTestId("restart-session")).toHaveCount(0)
+  await expect(page.getByTestId("end-session")).toBeVisible()
+})
