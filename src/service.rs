@@ -22,8 +22,11 @@ pub fn daemon_pid() -> Option<i32> {
     process_alive(pid).then_some(pid)
 }
 
+/// The start-at-login service runs the controller for ~/.seraph. With
+/// SERAPH_HOME set (another setup, like the tests'), it isn't that one's, so
+/// start and stop must leave it alone.
 pub fn service_installed() -> bool {
-    plist_path().exists() || systemd_path().exists()
+    std::env::var_os("SERAPH_HOME").is_none() && (plist_path().exists() || systemd_path().exists())
 }
 
 /// Where the page is hosted, for messages and `seraph open`.
@@ -189,6 +192,9 @@ pub fn cmd_service(action: &str) -> Result<i32> {
         }
         "install" => {
             config::require()?;
+            if std::env::var_os("SERAPH_HOME").is_some() {
+                bail!("Start at login is for the setup in ~/.seraph. Unset SERAPH_HOME to turn it on.");
+            }
             if daemon_pid().is_some() {
                 cmd_stop()?;
             }

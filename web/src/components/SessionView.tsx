@@ -112,7 +112,7 @@ function Confirm({
 
 /** The power button: pause, restart or end, like a laptop's. Only sessions
  * started from the page can pause or restart; a terminal's can only end. */
-function PowerMenu({ session, headless, onRestart }: { session: Session; headless: boolean; onRestart: () => void }) {
+function PowerMenu({ session, headless, hostOnline, onRestart }: { session: Session; headless: boolean; hostOnline: boolean; onRestart: () => void }) {
   const [asking, setAsking] = useState<"restart" | "end" | null>(null)
   const close = (open: boolean) => !open && setAsking(null)
   return (
@@ -126,10 +126,11 @@ function PowerMenu({ session, headless, onRestart }: { session: Session; headles
         <DropdownMenuContent align="end">
           {headless && (
             <>
-              <DropdownMenuItem onSelect={() => pauseSession(session.id).catch(() => {})} data-testid="pause-session">
+              {/* Both need the computer's controller to start Claude again. */}
+              <DropdownMenuItem disabled={!hostOnline} onSelect={() => pauseSession(session.id).catch(() => {})} data-testid="pause-session">
                 <PauseIcon /> Pause
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setAsking("restart")} data-testid="restart-session">
+              <DropdownMenuItem disabled={!hostOnline} onSelect={() => setAsking("restart")} data-testid="restart-session">
                 <RotateCwIcon /> Restart
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -198,6 +199,7 @@ export function SessionView({
   pinned,
   canPin,
   onTogglePin,
+  hostOnline,
 }: {
   session: Session
   onOpen: (id: string) => void
@@ -205,6 +207,8 @@ export function SessionView({
   pinned: boolean
   canPin: boolean
   onTogglePin: () => void
+  /** Whether the computer the session runs on has its controller running. */
+  hostOnline: boolean
 }) {
   const ended = session.status === "ended"
   // Paused: Claude is stopped (or stopping) but the session waits to be resumed.
@@ -343,7 +347,7 @@ export function SessionView({
                 >
                   <span className="truncate">{modeLabel ?? "Mode"}</span>
                 </Button>
-                {!paused && <PowerMenu session={session} headless={headless} onRestart={restart} />}
+                {!paused && <PowerMenu session={session} headless={headless} hostOnline={hostOnline} onRestart={restart} />}
               </>
             )}
             {ended && paused && (
@@ -366,7 +370,14 @@ export function SessionView({
               </Confirm>
             )}
             {ended && (session.claude_session_id || headless) && (
-              <Button size="sm" className="rounded-full" onClick={resume} disabled={resuming} data-testid="resume">
+              <Button
+                size="sm"
+                className="rounded-full"
+                onClick={resume}
+                disabled={resuming || !hostOnline}
+                title={hostOnline ? undefined : `${session.hostname ?? "Its computer"} is offline`}
+                data-testid="resume"
+              >
                 <RotateCcwIcon /> {resuming ? "Resuming…" : "Resume"}
               </Button>
             )}
@@ -394,6 +405,16 @@ export function SessionView({
               <span>
                 Claude is waiting on you.{" "}
                 <Button variant="link" className="h-auto p-0 text-sm underline" onClick={() => setTab("terminal")}>Open the terminal</Button> to answer.
+              </span>
+            </AlertDescription>
+          </Alert>
+        )}
+        {!hostOnline && (ended || paused) && (headless || session.claude_session_id) && (
+          <Alert data-testid="host-offline">
+            <AlertDescription>
+              <span>
+                {session.hostname ?? "The computer it ran on"} is offline. Its conversation lives there, so it resumes there: run{" "}
+                <code className="font-mono">seraph start</code> on it, and Resume works from any device.
               </span>
             </AlertDescription>
           </Alert>

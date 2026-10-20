@@ -399,15 +399,24 @@ fn run_steps(controller_id: &str, steps: &[Step]) {
     }
 }
 
+/// The page waits 30 seconds for an answer; a request older than this is stale.
+const REQUEST_EXPIRES_SECS: f64 = 120.0;
+
 fn run_requests(controller_id: &str) -> Result<()> {
     let cmds = select_rows(
         "commands",
-        &format!("session_id=is.null&status=eq.pending&or=(target.is.null,target.eq.{})&order=id&select=id,kind,payload", quote(controller_id)),
+        &format!("session_id=is.null&status=eq.pending&or=(target.is.null,target.eq.{})&order=id&select=id,kind,payload,created_at", quote(controller_id)),
     )?;
     for cmd in cmds {
         let id = cmd["id"].as_i64().unwrap_or(0);
         if !claim(id)? {
             continue; // another computer got it first
+        }
+        // Asked while this controller wasn't running: the page gave up long
+        // ago, so starting or resuming a session now would come out of nowhere.
+        if cmd["created_at"].as_str().is_some_and(|t| crate::util::age_secs(t) > REQUEST_EXPIRES_SECS) {
+            finish_command(id, None, Some("Expired: this computer's controller wasn't running when it was asked.".into()))?;
+            continue;
         }
         match handle(&cmd) {
             Ok(result) => finish_command(id, Some(result), None)?,

@@ -550,6 +550,7 @@ test("the header shows context and plan usage from Claude's status line, live", 
 })
 
 test("the power menu restarts or pauses a page session; a terminal's can only end", async ({ page }) => {
+  await db.from("controllers").upsert({ id: "test-box", hostname: "test-box", home: "/home/test", last_seen: new Date().toISOString() })
   await db.from("sessions").update({ hostname: "test-box" }).eq("id", session.id)
   await page.goto(`/#/s/${session.id}`)
   await page.getByTestId("power").click()
@@ -584,6 +585,22 @@ test("the power menu restarts or pauses a page session; a terminal's can only en
   await expect(page.getByTestId("end-session")).toBeVisible()
   await expect(page.getByTestId("restart-session")).toHaveCount(0)
   await expect(page.getByTestId("pause-session")).toHaveCount(0)
+  await db.from("controllers").delete().eq("id", "test-box")
+})
+
+test("a session whose computer is offline says where to resume it", async ({ page }) => {
+  await db.from("sessions").update({ hostname: "spark", status: "ended", ended_at: new Date().toISOString(), claude_session_id: "c-1" }).eq("id", session.id)
+  await page.goto(`/#/s/${session.id}`)
+  await expect(page.getByTestId("host-offline")).toContainText("spark is offline")
+  await expect(page.getByTestId("resume")).toBeDisabled()
+
+  await db.from("controllers").upsert({ id: "spark", hostname: "spark", home: "/home/joe", last_seen: new Date().toISOString() })
+  try {
+    await expect(page.getByTestId("host-offline")).toHaveCount(0)
+    await expect(page.getByTestId("resume")).toBeEnabled()
+  } finally {
+    await db.from("controllers").delete().eq("id", "spark")
+  }
 })
 
 test("a message sent while Claude is busy never disappears, and shows once when delivered", async ({ page }) => {

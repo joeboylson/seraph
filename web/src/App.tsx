@@ -122,6 +122,7 @@ export default function App() {
               pinned={pins.includes(selected.id)}
               canPin={pins.length < MAX_PINS}
               onTogglePin={() => togglePin(selected.id)}
+              hostOnline={!!selected.hostname && machines.some((m) => m.id === selected.hostname)}
             />
           ) : loading || selectedId ? (
             <Empty>

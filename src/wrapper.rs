@@ -577,6 +577,14 @@ pub fn cmd_claude(args: &[String]) -> Result<i32> {
         }
     };
     let (mut headless, mut session_id, mut name) = (false, uuid::Uuid::new_v4().to_string(), None);
+    // This computer's controller is what lets the page start, resume and
+    // restart sessions here, so make sure it's running.
+    if !args.iter().any(|a| a == "--seraph-headless") && crate::service::daemon_pid().is_none() {
+        let started = crate::util::detach(std::process::Command::new(config::exe()).arg("start").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())).spawn();
+        if started.is_ok() {
+            eprintln!("seraph: started this computer's controller, so the page can manage its sessions.");
+        }
+    }
     let (mut cols, mut rows) = (120u16, 40u16);
     let mut claude_args = Vec::new();
     let mut it = args.iter();
