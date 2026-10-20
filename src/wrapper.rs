@@ -363,9 +363,17 @@ impl Wrapper {
                 continue;
             }
             match self.run_command(cmd) {
-                Ok(()) => finish_command(id, None, None)?,
+                Ok(()) => {
+                    // Kind and size only: what was typed stays private. Keystrokes,
+                    // resizes and screen copies come many a second; they'd drown the rest.
+                    if !matches!(kind, "keys" | "resize" | "replay") {
+                        let size = cmd["payload"]["text"].as_str().map(|t| format!(" ({} chars)", t.chars().count())).unwrap_or_default();
+                        log(format!("session {}: command {id} {kind}{size}", self.session_id));
+                    }
+                    finish_command(id, None, None)?
+                }
                 Err(e) => {
-                    log(format!("command {id}: {e}"));
+                    log(format!("session {}: command {id} {kind} failed: {e}", self.session_id));
                     finish_command(id, None, Some(e.to_string()))?;
                 }
             }
@@ -553,6 +561,7 @@ fn run(w: Arc<Wrapper>) -> Result<i32> {
     let mut status = 0;
     // SAFETY: reaping our own child.
     unsafe { libc::waitpid(w.child, &mut status, 0) };
+    log(format!("session {}: Claude exited ({})", w.session_id, if libc::WIFEXITED(status) { format!("code {}", libc::WEXITSTATUS(status)) } else { format!("signal {}", libc::WTERMSIG(status)) }));
     thread::sleep(Duration::from_millis(200)); // let the last output go out
     w.done.store(true, Ordering::Relaxed);
     if let Err(e) = update(
@@ -634,6 +643,11 @@ pub fn cmd_claude(args: &[String]) -> Result<i32> {
         last_output: Mutex::new(Instant::now()),
     };
     let registered = w.register();
+    log(format!(
+        "session {session_id}: starting Claude ({}) in {}",
+        if headless { "from the page" } else { "in a terminal" },
+        std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default()
+    ));
     let (master, child) = spawn(&settings.claude_bin, &claude_args, &session_id, cols, rows)?;
     w.master = master;
     w.child = child;

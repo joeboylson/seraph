@@ -5,6 +5,7 @@ mod daemon;
 mod embedded;
 mod hook;
 mod link;
+mod logship;
 mod push;
 mod service;
 mod setup;

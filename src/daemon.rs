@@ -193,6 +193,7 @@ fn restart_session(payload: &Value) -> Result<Value> {
 }
 
 fn finish_restart(id: &str, row: &Value, cwd: &Path, options: &Value) -> Result<()> {
+    log(format!("restart {id}: ending Claude (status {}), then resuming {}", row["status"], options["resume"].as_str().unwrap_or("fresh")));
     if row["status"] != "ended" {
         insert("commands", &json!({ "session_id": id, "kind": "kill" }), "return=minimal")?;
         let pid = row["pid"].as_i64().map(|p| p as i32);
@@ -209,7 +210,9 @@ fn finish_restart(id: &str, row: &Value, cwd: &Path, options: &Value) -> Result<
         }
     }
     update("sessions", &format!("id=eq.{id}"), &json!({ "status": "starting", "ended_at": null, "paused_at": null, "updated_at": now() }))?;
-    spawn_wrapper(id, cwd, options)
+    spawn_wrapper(id, cwd, options)?;
+    log(format!("restart {id}: started again"));
+    Ok(())
 }
 
 /// Mark a request as ours. Only one controller's update finds it still pending.
@@ -346,6 +349,7 @@ fn end_dead_sessions(hostname: &str) -> Result<()> {
     for row in rows {
         let Some(pid) = row["pid"].as_i64() else { continue };
         if !process_alive(pid as i32) {
+            log(format!("daemon: session {} ended (its process {pid} is gone)", row["id"].as_str().unwrap_or("")));
             update("sessions", &format!("id=eq.{}", row["id"].as_str().unwrap_or("")), &json!({ "status": "ended", "ended_at": now(), "updated_at": now() }))?;
         }
     }
@@ -415,13 +419,19 @@ fn run_requests(controller_id: &str) -> Result<()> {
         // Asked while this controller wasn't running: the page gave up long
         // ago, so starting or resuming a session now would come out of nowhere.
         if cmd["created_at"].as_str().is_some_and(|t| crate::util::age_secs(t) > REQUEST_EXPIRES_SECS) {
+            log(format!("daemon: request {id} {} expired (asked at {})", cmd["kind"].as_str().unwrap_or(""), cmd["created_at"].as_str().unwrap_or("")));
             finish_command(id, None, Some("Expired: this computer's controller wasn't running when it was asked.".into()))?;
             continue;
         }
+        let kind = cmd["kind"].as_str().unwrap_or("");
+        let started = Instant::now();
         match handle(&cmd) {
-            Ok(result) => finish_command(id, Some(result), None)?,
+            Ok(result) => {
+                log(format!("daemon: request {id} {kind} done in {} ms {}", started.elapsed().as_millis(), result["session_id"].as_str().map(|s| format!("(session {s})")).unwrap_or_default()));
+                finish_command(id, Some(result), None)?
+            }
             Err(e) => {
-                log(format!("daemon command {id}: {e}"));
+                log(format!("daemon: request {id} {kind} failed: {e}"));
                 finish_command(id, None, Some(readable(&e)))?;
             }
         }
@@ -459,8 +469,10 @@ pub fn cmd_daemon() -> Result<i32> {
     signal_hook::flag::register(signal_hook::consts::SIGTERM, stop.clone())?;
     signal_hook::flag::register(signal_hook::consts::SIGINT, stop.clone())?;
     println!("seraph daemon: install line on http://127.0.0.1:{}/install, Supabase at {}", s.web_port, s.url);
+    log(format!("daemon: started, seraph {} as {controller_id}", crate::VERSION));
 
     let (mut last_beat, mut last_purge, mut last_watch) = (None, None, None);
+    let (mut last_ship, mut last_prune) = (None, None);
     let mut watcher = push::Watcher::default();
     while !stop.load(Ordering::Relaxed) {
         if every(&mut last_watch, 3) {
@@ -470,6 +482,12 @@ pub fn cmd_daemon() -> Result<i32> {
         }
         if every(&mut last_purge, 60) {
             run_steps(&controller_id, &[("purge", purge), ("remove_orphan_uploads", remove_orphan_uploads)]);
+        }
+        if every(&mut last_ship, 60) {
+            run_steps(&controller_id, &[("ship_logs", crate::logship::ship)]);
+        }
+        if every(&mut last_prune, 3600) {
+            run_steps(&controller_id, &[("prune_logs", crate::logship::prune)]);
         }
         if every(&mut last_beat, 10) {
             run_steps(&controller_id, &[("heartbeat", heartbeat), ("end_dead_sessions", end_dead_sessions)]);
@@ -485,6 +503,11 @@ pub fn cmd_daemon() -> Result<i32> {
         }
     }
     // A clean exit, so launchd/systemd don't restart it after `seraph stop`.
+    log("daemon: stopping");
+    // Send what's left, so the last lines before a stop aren't held back.
+    if let Err(e) = crate::logship::ship(&controller_id) {
+        log(format!("daemon ship_logs: {e}"));
+    }
     let _ = fs::remove_file(config::pid_path());
     Ok(0)
 }
