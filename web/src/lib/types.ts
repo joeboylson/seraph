@@ -1,5 +1,14 @@
 export type SessionStatus = "starting" | "idle" | "working" | "waiting" | "ended"
 
+type UsageWindow = { used_percentage: number; resets_at: number | null }
+
+/** What Claude's status line last reported: context and plan limits, in percent. */
+export type SessionUsage = {
+  context_percentage: number | null
+  five_hour: UsageWindow | null
+  seven_day: UsageWindow | null
+}
+
 export type Session = {
   id: string
   name: string | null
@@ -15,6 +24,7 @@ export type Session = {
   created_at: string
   updated_at: string
   ended_at: string | null
+  usage: SessionUsage | null
 }
 
 export type HookEvent = {

@@ -69,12 +69,31 @@ fn stale_after(kind: &str) -> Option<f64> {
 const BROADCAST_CHUNK: usize = 24 * 1024; // base64 grows this by a third; stays under the payload cap
 const SCROLLBACK_BYTES: usize = 512 * 1024; // replayed to a page that joins mid-session
 
+/// Your own status line, if you have one: the first found in this folder's
+/// .claude/settings.local.json, .claude/settings.json, then ~/.claude's.
+fn user_status_line() -> Option<Value> {
+    let home = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".claude");
+    let project = std::env::current_dir().ok()?.join(".claude");
+    [project.join("settings.local.json"), project.join("settings.json"), home.join("settings.local.json"), home.join("settings.json")]
+        .iter()
+        .filter_map(|p| serde_json::from_str::<Value>(&std::fs::read_to_string(p).ok()?).ok())
+        .find_map(|v| v.get("statusLine").filter(|s| s["command"].is_string()).cloned())
+}
+
+/// Seraph's hooks, and its status line (which runs yours too, see status.rs).
 fn hook_settings() -> String {
-    let command = format!("{} _hook", shell_quote(&config::exe().to_string_lossy()));
-    let hook = json!({ "type": "command", "command": command, "async": true });
+    let exe = shell_quote(&config::exe().to_string_lossy());
+    let hook = json!({ "type": "command", "command": format!("{exe} _hook"), "async": true });
     let hooks: serde_json::Map<String, Value> =
         HOOK_EVENTS.iter().map(|e| (e.to_string(), json!([{ "hooks": [hook] }]))).collect();
-    json!({ "hooks": hooks }).to_string()
+    let mut status_line = json!({ "type": "command", "command": format!("{exe} _status") });
+    if let Some(yours) = user_status_line() {
+        std::env::set_var(crate::status::USER_COMMAND_ENV, yours["command"].as_str().unwrap_or_default());
+        if let Some(padding) = yours.get("padding") {
+            status_line["padding"] = padding.clone();
+        }
+    }
+    json!({ "hooks": hooks, "statusLine": status_line }).to_string()
 }
 
 #[derive(Default)]

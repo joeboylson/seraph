@@ -533,3 +533,18 @@ for (const size of ["desktop", "phone"] as const) {
     await expect(page.getByTestId("composer")).toBeInViewport()
   })
 }
+
+test("the header shows context and plan usage from Claude's status line, live", async ({ page }) => {
+  await page.goto(`/#/s/${session.id}`)
+  await expect(page.getByTestId("session-title")).toBeVisible()
+  await expect(page.getByTestId("usage")).toHaveCount(0)
+  const resets = Math.floor(Date.now() / 1000) + 3600
+  await db
+    .from("sessions")
+    .update({ usage: { context_percentage: 42, five_hour: { used_percentage: 80, resets_at: resets }, seven_day: { used_percentage: 12, resets_at: resets + 86400 * 3 } } })
+    .eq("id", session.id)
+  await expect(page.getByTestId("usage-context")).toContainText("42%")
+  await expect(page.getByTestId("usage-five-hour")).toContainText("80%")
+  await expect(page.getByTestId("usage-five-hour")).toContainText("resets")
+  await expect(page.getByTestId("usage-weekly")).toContainText("12%")
+})

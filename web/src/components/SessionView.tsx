@@ -31,6 +31,7 @@ import { PromptCard, promptKey } from "./PromptCard"
 import { sessionTitle } from "./SessionList"
 import { StatusBadge } from "./StatusBadge"
 import { TerminalView } from "./TerminalView"
+import { UsageBars } from "./UsageBars"
 import { Todos } from "./ToolCard"
 
 const MODE_LABELS: Record<string, string> = {
@@ -207,6 +208,7 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
           {session.model && " · "}
           {[context ? `${formatTokens(context)} context` : null, origin].filter(Boolean).join(" · ")}
         </p>
+        <UsageBars usage={session.usage} />
       </header>
 
       <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0">

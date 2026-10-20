@@ -8,6 +8,7 @@ mod link;
 mod push;
 mod service;
 mod setup;
+mod status;
 mod supa;
 mod transcript;
 mod users;
@@ -308,6 +309,7 @@ fn dispatch(argv: &[String]) -> Result<i32> {
         "claude" => wrapper::cmd_claude(rest),
         "_follow" => link::cmd_follow(rest),
         "_hook" => Ok(hook::cmd_hook(rest)),
+        "_status" => Ok(status::cmd_status(rest)),
         "setup" => {
             let parsed = setup::SetupArgs {
                 local: args.flag(&["--local"]),
@@ -390,7 +392,7 @@ fn main() {
     // Short commands stop quietly when their output is cut off (`seraph status | head`).
     // The long-running ones keep ignoring it: a closed browser connection or
     // terminal must not kill the controller or a session.
-    if !matches!(argv.first().map(String::as_str), Some("daemon" | "claude" | "resume" | "_hook" | "_follow")) {
+    if !matches!(argv.first().map(String::as_str), Some("daemon" | "claude" | "resume" | "_hook" | "_status" | "_follow")) {
         // SAFETY: restoring the default action for one signal before any threads start.
         unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
     }
