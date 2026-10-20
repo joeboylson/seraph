@@ -585,3 +585,27 @@ test("the power menu restarts or pauses a page session; a terminal's can only en
   await expect(page.getByTestId("restart-session")).toHaveCount(0)
   await expect(page.getByTestId("pause-session")).toHaveCount(0)
 })
+
+test("a message sent while Claude is busy never disappears, and shows once when delivered", async ({ page }) => {
+  await page.goto(`/#/s/${session.id}`)
+  await page.getByTestId("composer").fill("also add a reset button")
+  await page.getByTestId("send").click()
+  await expect(page.getByTestId("sent")).toContainText("also add a reset button")
+  // Claude keeps working; the message is still waiting.
+  const later = new Date(Date.now() + 5000).toISOString()
+  await addMessages(
+    session.id,
+    Array.from({ length: 5 }, (_, i) => ({ type: "assistant", timestamp: later, message: { role: "assistant", content: [{ type: "text", text: `step ${i + 1}` }] } })),
+  )
+  await db.from("messages").update({ ts: later }).eq("session_id", session.id)
+  await expect(page.getByTestId("chat")).toContainText("step 5")
+  await expect(page.getByTestId("sent")).toContainText("also add a reset button")
+
+  // Delivered: typed in, and Claude saves it as a queued message.
+  await db.from("commands").update({ status: "done" }).eq("session_id", session.id).eq("kind", "prompt")
+  const delivered = new Date(Date.now() + 10000).toISOString()
+  await addMessages(session.id, [{ type: "attachment", timestamp: delivered, attachment: { type: "queued_command", prompt: "also add a reset button" } }])
+  await db.from("messages").update({ ts: delivered }).eq("session_id", session.id).eq("type", "attachment")
+  await expect(page.getByTestId("sent")).toHaveCount(0)
+  await expect(page.getByTestId("chat").getByText("also add a reset button")).toHaveCount(1)
+})

@@ -16,6 +16,13 @@ fn kind(entry: &Value) -> &str {
     entry["type"].as_str().unwrap_or("")
 }
 
+/// Lines the page shows. A message sent while Claude is busy is saved as an
+/// attachment (a "queued_command"), not a user line, so keep those too, or it
+/// never shows in the chat.
+fn shown(entry: &Value) -> bool {
+    TRANSCRIPT_TYPES.contains(&kind(entry)) || (kind(entry) == "attachment" && entry["attachment"]["type"] == "queued_command")
+}
+
 /// Best guess at the session's status from one transcript line.
 fn transcript_status(entry: &Value) -> Option<&'static str> {
     if kind(entry) == "system" && entry["subtype"] == "turn_duration" {
@@ -95,7 +102,7 @@ impl Follower {
                 continue;
             }
             let entry: Value = serde_json::from_slice(line)?;
-            if !TRANSCRIPT_TYPES.contains(&kind(&entry)) {
+            if !shown(&entry) {
                 continue;
             }
             let uuid = entry["uuid"]
@@ -162,5 +169,18 @@ pub fn follow_transcript(session_id: &str, done: &AtomicBool, infer_status: bool
         if let Err(e) = follower.step() {
             log(format!("transcript: {e}"));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keeps_queued_messages_but_not_other_attachments() {
+        assert!(shown(&json!({ "type": "user" })));
+        assert!(shown(&json!({ "type": "attachment", "attachment": { "type": "queued_command", "prompt": "hi" } })));
+        assert!(!shown(&json!({ "type": "attachment", "attachment": { "type": "file" } })));
+        assert!(!shown(&json!({ "type": "queue-operation" })));
     }
 }

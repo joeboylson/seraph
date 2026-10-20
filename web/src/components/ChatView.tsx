@@ -22,8 +22,8 @@ import { ToolCard } from "./ToolCard"
 
 
 type Item =
-  | { kind: "user"; key: string; text: string }
-  | { kind: "command"; key: string; name: string; args: string }
+  | { kind: "user"; key: string; text: string; ts?: string }
+  | { kind: "command"; key: string; name: string; args: string; ts?: string }
   | { kind: "output"; key: string; text: string }
   | { kind: "assistant"; key: string; text: string }
   | { kind: "thinking"; key: string; text: string }
@@ -34,6 +34,7 @@ const tag = (text: string, name: string) => text.match(new RegExp(`<${name}>([\\
 
 function toItems(messages: MessageRow[]): Item[] {
   const items: Item[] = []
+  const queued: string[] = []
   for (const m of messages) {
     const d = m.data
     if (d.isSidechain) continue
@@ -46,8 +47,21 @@ function toItems(messages: MessageRow[]): Item[] {
     if (d.type === "system" && d.subtype === "local_command" && typeof d.content === "string") {
       const name = tag(d.content, "command-name")
       const stdout = tag(d.content, "local-command-stdout")?.trim()
-      if (name) items.push({ kind: "command", key: m.uuid, name, args: tag(d.content, "command-args") ?? "" })
+      if (name) items.push({ kind: "command", ts: m.ts ?? undefined, key: m.uuid, name, args: tag(d.content, "command-args") ?? "" })
       else if (stdout) items.push({ kind: "output", key: m.uuid, text: stdout })
+      continue
+    }
+    // Sent while Claude was busy: saved as a "queued_command" attachment, not
+    // a user line. Shown as what the person said; if Claude also writes it
+    // out as a user line once it's delivered, that copy is skipped.
+    const attachment = d.type === "attachment" ? (d.attachment as { type?: string; prompt?: unknown } | undefined) : undefined
+    if (attachment?.type === "queued_command") {
+      const p = attachment.prompt
+      const text = typeof p === "string" ? p : Array.isArray(p) ? p.map((b) => (b as { text?: string }).text ?? "").join("") : ""
+      if (text.trim()) {
+        items.push({ kind: "user", ts: m.ts ?? undefined, key: m.uuid, text })
+        queued.push(text.trim())
+      }
       continue
     }
     if (!d.message) continue
@@ -61,12 +75,17 @@ function toItems(messages: MessageRow[]): Item[] {
         const stdout = tag(b.text, "local-command-stdout")
         const bash = tag(b.text, "bash-input")
         const bashOut = tag(b.text, "bash-stdout")
-        if (name) items.push({ kind: "command", key, name, args: tag(b.text, "command-args") ?? "" })
-        else if (bash) items.push({ kind: "command", key, name: "!", args: bash })
+        if (name) items.push({ kind: "command", ts: m.ts ?? undefined, key, name, args: tag(b.text, "command-args") ?? "" })
+        else if (bash) items.push({ kind: "command", ts: m.ts ?? undefined, key, name: "!", args: bash })
         else if (stdout !== undefined || bashOut !== undefined) {
           const text = (stdout ?? bashOut ?? "").trim()
           if (text) items.push({ kind: "output", key, text })
-        } else if (!d.isMeta && !b.text.startsWith("<")) items.push({ kind: "user", key, text: b.text })
+        } else if (!d.isMeta && !b.text.startsWith("<")) {
+          // Already shown from when it was queued (see above).
+          const q = queued.indexOf(b.text.trim())
+          if (q >= 0) queued.splice(q, 1)
+          else items.push({ kind: "user", ts: m.ts ?? undefined, key, text: b.text })
+        }
       })
     } else if (d.type === "assistant" && Array.isArray(content)) {
       content.forEach((b, i) => {
@@ -90,20 +109,38 @@ function Prose({ text }: { text: string }) {
 
 type Sent = Command & { created_at: string }
 
+// How far the browser's clock and Claude's computer's clock may disagree.
+const CLOCK_SLACK_MS = 60_000
+
 /**
- * What the person sent that the transcript doesn't show yet, so it appears
- * the moment it's sent. Some things never reach the transcript (a /cost
- * panel closed with Esc), so an echo also goes once the conversation has
- * moved past it.
+ * What the person sent that the conversation doesn't show yet, so it appears
+ * the moment it's sent. A message stays until the conversation shows it:
+ * one that's still queued or failed is never hidden. Slash commands are the
+ * exception: some never reach the transcript (a /cost panel closed with
+ * Esc), so once sent they go when the conversation moves past them.
  */
 function unechoed(sent: Sent[], items: Item[], messages: MessageRow[]) {
-  const said = new Set(
-    items.flatMap((i) => (i.kind === "user" ? [i.text.trim()] : i.kind === "command" ? [`${i.name} ${i.args}`.trim()] : [])),
+  // Each line in the conversation can stand for one sent message, sent
+  // before it was written.
+  const said = items.flatMap((i) =>
+    i.kind === "user" ? [{ text: i.text.trim(), ts: i.ts }] : i.kind === "command" ? [{ text: `${i.name} ${i.args}`.trim(), ts: i.ts }] : [],
   )
-  const latest = messages.reduce((t, m) => (m.ts && m.ts > t ? m.ts : t), "")
+  const times = messages.flatMap((m) => (m.ts ? [new Date(m.ts).getTime()] : []))
+  const latest = times.length ? Math.max(...times) : 0
+  const oldest = times.length ? Math.min(...times) : 0
   return sent.filter((c) => {
     const text = String(c.payload.text ?? "").trim()
-    return !said.has(text) && (!latest || new Date(c.created_at) > new Date(latest))
+    const at = new Date(c.created_at).getTime()
+    const echo = said.findIndex((s) => s.text === text && (!s.ts || new Date(s.ts).getTime() >= at - CLOCK_SLACK_MS))
+    if (echo >= 0) {
+      said.splice(echo, 1)
+      return false
+    }
+    if (c.status !== "done") return true
+    if (text.startsWith("/")) return !latest || at > latest
+    // Older than everything still kept: it was shown once, before older
+    // lines were cleared out.
+    return !(oldest && at < oldest - CLOCK_SLACK_MS)
   })
 }
 
