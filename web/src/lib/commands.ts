@@ -57,6 +57,19 @@ export async function renameSession(sessionId: string, name: string) {
   report("rename the session", error)
 }
 
+/** Pause a session: mark it, then stop its Claude. Resuming clears the mark. */
+export async function pauseSession(sessionId: string) {
+  const { error } = await db.from("sessions").update({ paused_at: new Date().toISOString() }).eq("id", sessionId)
+  report("pause the session", error)
+  await sendCommand(sessionId, "kill")
+}
+
+/** End a paused session for good: it moves to the ended ones. */
+export async function endPaused(sessionId: string) {
+  const { error } = await db.from("sessions").update({ paused_at: null }).eq("id", sessionId)
+  report("end the session", error)
+}
+
 /** Delete an ended session with its transcript, events and commands. */
 export async function deleteSession(sessionId: string) {
   const { error } = await db.from("sessions").delete().eq("id", sessionId).eq("status", "ended")

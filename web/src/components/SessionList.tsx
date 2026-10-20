@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/sidebar"
 import { cn, timeAgo } from "@/lib/utils"
 import type { Session } from "@/lib/types"
-import { StatusBadge } from "./StatusBadge"
+import { StatusBadge, shownStatus } from "./StatusBadge"
 
 export function sessionTitle(s: Session) {
   return s.name || s.cwd.split("/").filter(Boolean).pop() || s.cwd
@@ -77,7 +77,7 @@ export function SessionList({
                 {devices.length ? (
                   <SidebarMenu>
                     {devices.map((d) => {
-                      const running = sessions.filter((s) => deviceOf(s) === d && s.status !== "ended").length
+                      const running = sessions.filter((s) => deviceOf(s) === d && s.status !== "ended" && !s.paused_at).length
                       return (
                         <SidebarMenuItem key={d}>
                           <SidebarMenuButton onClick={() => setPicked(d)} data-testid="device-item">
@@ -133,21 +133,22 @@ function DeviceSessions({
   const [query, setQuery] = useState("")
   const [shown, setShown] = useState(20)
   // Ended sessions stay folded away unless asked for, searched, or open.
-  const [endedOpen, setEndedOpen] = useState(() => sessions.some((s) => s.id === selectedId && s.status === "ended"))
+  const [endedOpen, setEndedOpen] = useState(() => sessions.some((s) => s.id === selectedId && s.status === "ended" && !s.paused_at))
   const q = query.trim().toLowerCase()
   const matching = q ? sessions.filter((s) => sessionTitle(s).toLowerCase().includes(q)) : sessions
-  const live = matching.filter((s) => s.status !== "ended")
-  const allEnded = matching.filter((s) => s.status === "ended")
+  // Paused sessions stay with the running ones until resumed or ended.
+  const live = matching.filter((s) => s.status !== "ended" || s.paused_at)
+  const allEnded = matching.filter((s) => s.status === "ended" && !s.paused_at)
   const ended = allEnded.slice(0, shown)
 
   const item = (s: Session) => (
     <SidebarMenuItem key={s.id}>
       <SidebarMenuButton onClick={() => onSelect(s.id)} isActive={s.id === selectedId} aria-current={s.id === selectedId} data-testid="session-item" className="justify-between">
         <span className="truncate">{sessionTitle(s)}</span>
-        {s.status === "ended" ? (
+        {s.status === "ended" && !s.paused_at ? (
           <span className="label shrink-0 normal-case">{timeAgo(s.ended_at ?? s.updated_at)}</span>
         ) : (
-          <StatusBadge status={s.status} className="shrink-0 border-transparent px-0" />
+          <StatusBadge status={shownStatus(s)} className="shrink-0 border-transparent px-0" />
         )}
       </SidebarMenuButton>
     </SidebarMenuItem>

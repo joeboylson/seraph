@@ -1,4 +1,4 @@
-import { PencilIcon, PowerIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon } from "lucide-react"
+import { PauseIcon, PencilIcon, PowerIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import {
@@ -14,13 +14,14 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceDescription, TraceLine, TraceTitle } from "@/components/ui/trace"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useMessages, useSentPrompts, useSessionEvents } from "@/hooks/data"
-import { askDaemon, deleteSession, renameSession, sendCommand, sendKeys } from "@/lib/commands"
+import { askDaemon, deleteSession, endPaused, pauseSession, renameSession, sendCommand, sendKeys } from "@/lib/commands"
 import { readMode, readPrompt, type Prompt } from "@/lib/screen"
 import { dropMirror, getMirror } from "@/lib/terminal"
 import { contextTokens, fileChanges, latestTodos, shortPath, type Todo } from "@/lib/tools"
@@ -30,7 +31,7 @@ import { ChatView } from "./ChatView"
 import { Composer } from "./Composer"
 import { PromptCard, promptKey } from "./PromptCard"
 import { sessionTitle } from "./SessionList"
-import { StatusBadge } from "./StatusBadge"
+import { StatusBadge, shownStatus } from "./StatusBadge"
 import { TerminalView } from "./TerminalView"
 import { UsageBars } from "./UsageBars"
 import { Todos } from "./ToolCard"
@@ -73,10 +74,26 @@ function PlanBar({ todos }: { todos: Todo[] }) {
 }
 
 /** A button that asks before it acts. */
-function Confirm({ title, description, action, onConfirm, children }: { title: string; description?: string; action: string; onConfirm: () => void; children: React.ReactNode }) {
+function Confirm({
+  title,
+  description,
+  action,
+  onConfirm,
+  children,
+  open,
+  onOpenChange,
+}: {
+  title: string
+  description?: string
+  action: string
+  onConfirm: () => void
+  children?: React.ReactNode
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}) {
   return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>{children}</AlertDialogTrigger>
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      {children && <AlertDialogTrigger asChild>{children}</AlertDialogTrigger>}
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
@@ -90,6 +107,49 @@ function Confirm({ title, description, action, onConfirm, children }: { title: s
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+}
+
+/** The power button: pause, restart or end, like a laptop's. Only sessions
+ * started from the page can pause or restart; a terminal's can only end. */
+function PowerMenu({ session, headless, onRestart }: { session: Session; headless: boolean; onRestart: () => void }) {
+  const [asking, setAsking] = useState<"restart" | "end" | null>(null)
+  const close = (open: boolean) => !open && setAsking(null)
+  return (
+    <>
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm" className="rounded-full" aria-label="Power" title="Pause, restart or end" data-testid="power">
+            <PowerIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {headless && (
+            <>
+              <DropdownMenuItem onSelect={() => pauseSession(session.id).catch(() => {})} data-testid="pause-session">
+                <PauseIcon /> Pause
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setAsking("restart")} data-testid="restart-session">
+                <RotateCwIcon /> Restart
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          <DropdownMenuItem variant="destructive" onSelect={() => setAsking("end")} data-testid="end-session">
+            <PowerIcon /> End session
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Confirm
+        open={asking === "restart"}
+        onOpenChange={close}
+        title="Restart this session?"
+        description="Claude stops, then starts again in the same folder and picks the conversation back up. Anything it's in the middle of is lost."
+        action="Restart"
+        onConfirm={onRestart}
+      />
+      <Confirm open={asking === "end"} onOpenChange={close} title="End this session?" action="End session" onConfirm={() => sendCommand(session.id, "kill")} />
+    </>
   )
 }
 
@@ -133,6 +193,8 @@ function RenameButton({ session }: { session: Session }) {
 
 export function SessionView({ session, onOpen, onDeleted }: { session: Session; onOpen: (id: string) => void; onDeleted: () => void }) {
   const ended = session.status === "ended"
+  // Paused: Claude is stopped (or stopping) but the session waits to be resumed.
+  const paused = !!session.paused_at
   // A linked session is followed through its transcript only: there's no
   // terminal to mirror or type into.
   const linked = session.mode === "linked"
@@ -212,7 +274,7 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
         <div className="flex min-w-0 items-center gap-s4">
           <h1 className="min-w-0 truncate text-title font-medium tracking-[-0.03em]" data-testid="session-title">{sessionTitle(session)}</h1>
           <RenameButton session={session} />
-          <StatusBadge status={session.status} className="shrink-0" />
+          <StatusBadge status={shownStatus(session)} className="shrink-0" />
         </div>
         {/* Cut from the left so the project folder stays visible. */}
         <p className="truncate text-left font-mono text-sm text-muted-foreground [direction:rtl]" title={session.cwd}>
@@ -254,26 +316,17 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
                 >
                   <span className="truncate">{modeLabel ?? "Mode"}</span>
                 </Button>
-                {headless && (
-                  <Confirm
-                    title="Restart this session?"
-                    description="Claude stops, then starts again in the same folder and picks the conversation back up. Anything it's in the middle of is lost."
-                    action="Restart"
-                    onConfirm={restart}
-                  >
-                    <Button variant="outline" size="sm" className="rounded-full" aria-label="Restart session" title="Restart session" data-testid="restart-session">
-                      <RotateCwIcon /> <span className="hidden sm:inline">Restart</span>
-                    </Button>
-                  </Confirm>
-                )}
-                <Confirm title="End this session?" action="End session" onConfirm={() => sendCommand(session.id, "kill")}>
-                  <Button variant="outline" size="sm" className="rounded-full" aria-label="End session" title="End session" data-testid="end-session">
-                    <PowerIcon /> <span className="hidden sm:inline">End</span>
-                  </Button>
-                </Confirm>
+                {!paused && <PowerMenu session={session} headless={headless} onRestart={restart} />}
               </>
             )}
-            {ended && (
+            {ended && paused && (
+              <Confirm title="End this session?" description="It moves to the ended sessions. You can still resume it from there." action="End session" onConfirm={() => endPaused(session.id).catch(() => {})}>
+                <Button variant="outline" size="sm" className="rounded-full" aria-label="End session" title="End session" data-testid="end-paused">
+                  <PowerIcon /> <span className="hidden sm:inline">End</span>
+                </Button>
+              </Confirm>
+            )}
+            {ended && !paused && (
               <Confirm
                 title="Delete this session?"
                 description="Its conversation is removed from Supabase. The files Claude changed stay as they are."
@@ -327,7 +380,7 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
             </AlertDescription>
           </Alert>
         ) : (
-          <Composer sessionId={session.id} working={session.status === "working" || session.status === "waiting"} disabled={ended} />
+          <Composer sessionId={session.id} working={session.status === "working" || session.status === "waiting"} disabled={ended || paused} paused={paused} />
         )}
       </div>
     </div>

@@ -549,9 +549,10 @@ test("the header shows context and plan usage from Claude's status line, live", 
   await expect(page.getByTestId("usage-weekly")).toContainText("12%")
 })
 
-test("a session started from the page can be restarted in place; a terminal's can't", async ({ page }) => {
+test("the power menu restarts or pauses a page session; a terminal's can only end", async ({ page }) => {
   await db.from("sessions").update({ hostname: "test-box" }).eq("id", session.id)
   await page.goto(`/#/s/${session.id}`)
+  await page.getByTestId("power").click()
   await page.getByTestId("restart-session").click()
   await page.getByTestId("confirm").click()
   await expect
@@ -562,7 +563,25 @@ test("a session started from the page can be restarted in place; a terminal's ca
     .toEqual([session.id])
   await db.from("commands").delete().eq("target", "test-box")
 
-  await db.from("sessions").update({ mode: "wrapped" }).eq("id", session.id)
-  await expect(page.getByTestId("restart-session")).toHaveCount(0)
+  // Pause: marked paused and Claude told to stop; it stays with the running sessions.
+  await page.getByTestId("power").click()
+  await page.getByTestId("pause-session").click()
+  await expectCommand(session.id, "kill")
+  await db.from("sessions").update({ status: "ended", ended_at: new Date().toISOString() }).eq("id", session.id)
+  await expect(page.getByTestId("session-title").locator("..").getByText("Paused")).toBeVisible()
+  await expect(page.getByTestId("composer")).toBeDisabled()
+  const list = page.getByRole("navigation", { name: "Sessions" })
+  await expect(list.getByTestId("session-item").filter({ hasText: session.name })).toContainText("Paused")
+  await expect(page.getByTestId("resume")).toBeVisible()
+  // Ending a paused session moves it to the ended ones.
+  await page.getByTestId("end-paused").click()
+  await page.getByTestId("confirm").click()
+  await expect(page.getByTestId("delete-session")).toBeVisible()
+  await expect(list.getByTestId("ended-toggle")).toBeVisible()
+
+  await db.from("sessions").update({ mode: "wrapped", status: "idle", ended_at: null }).eq("id", session.id)
+  await page.getByTestId("power").click()
   await expect(page.getByTestId("end-session")).toBeVisible()
+  await expect(page.getByTestId("restart-session")).toHaveCount(0)
+  await expect(page.getByTestId("pause-session")).toHaveCount(0)
 })

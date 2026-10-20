@@ -53,7 +53,7 @@ function readImage(file: File): Promise<Image> {
   })
 }
 
-export function Composer({ sessionId, working, disabled }: { sessionId: string; working: boolean; disabled: boolean }) {
+export function Composer({ sessionId, working, disabled, paused }: { sessionId: string; working: boolean; disabled: boolean; paused?: boolean }) {
   const [text, setText] = useState("")
   const [sending, setSending] = useState(false)
   const [images, setImages] = useState<Image[]>([])
@@ -168,7 +168,7 @@ export function Composer({ sessionId, working, disabled }: { sessionId: string; 
               send()
             }
           }}
-          placeholder={disabled ? "This session has ended" : "Message Claude, / for commands"}
+          placeholder={paused ? "Paused. Resume to carry on." : disabled ? "This session has ended" : "Message Claude, / for commands"}
           disabled={disabled}
           rows={1}
           className="min-h-10 px-s4 py-s3 text-body placeholder:truncate"

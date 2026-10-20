@@ -106,6 +106,7 @@ test("build a small app from the web page @real", async ({ page }) => {
   await expect.poll(() => sessionStatus(id), { timeout: 60_000 }).not.toBe("working")
 
   // 6. End the session, then resume it from the page.
+  await page.getByTestId("power").click()
   await page.getByTestId("end-session").click()
   await page.getByTestId("confirm").click()
   await expect.poll(() => sessionStatus(id), { timeout: 60_000 }).toBe("ended")
@@ -129,6 +130,7 @@ test("build a small app from the web page @real", async ({ page }) => {
     const { data } = await db.from("messages").select("data").eq("session_id", resumed).eq("type", "assistant")
     return JSON.stringify(data).includes("RED")
   })
+  await page.getByTestId("power").click()
   await page.getByTestId("end-session").click()
   await page.getByTestId("confirm").click()
   await expect.poll(() => sessionStatus(resumed), { timeout: 60_000 }).toBe("ended")

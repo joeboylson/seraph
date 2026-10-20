@@ -208,7 +208,7 @@ fn finish_restart(id: &str, row: &Value, cwd: &Path, options: &Value) -> Result<
             }
         }
     }
-    update("sessions", &format!("id=eq.{id}"), &json!({ "status": "starting", "ended_at": null, "updated_at": now() }))?;
+    update("sessions", &format!("id=eq.{id}"), &json!({ "status": "starting", "ended_at": null, "paused_at": null, "updated_at": now() }))?;
     spawn_wrapper(id, cwd, options)
 }
 

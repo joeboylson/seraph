@@ -25,6 +25,8 @@ export type Session = {
   updated_at: string
   ended_at: string | null
   usage: SessionUsage | null
+  /** Set while the session is paused: Claude stopped, waiting to be resumed. */
+  paused_at: string | null
 }
 
 export type HookEvent = {
