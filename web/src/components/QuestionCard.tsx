@@ -68,7 +68,7 @@ export function QuestionCard({ sessionId, questions, onOpenTerminal }: { session
           {questions.length > 1 && <QuestionnaireProgress />}
           {questions.map((q, i) => {
             const a = answers[i]
-            const other = !q.multiSelect && a.other !== undefined
+            const other = a.other !== undefined
             return (
               <QuestionnaireItem key={i} name={`q${i}`} multiple={q.multiSelect} required data-testid="question">
                 <QuestionnaireTitle className="text-body font-medium">{q.question}</QuestionnaireTitle>
@@ -81,7 +81,7 @@ export function QuestionCard({ sessionId, questions, onOpenTerminal }: { session
                       onChange={(e) =>
                         set(i, (a) =>
                           q.multiSelect
-                            ? { picked: e.target.checked ? [...a.picked, o.label] : a.picked.filter((p) => p !== o.label) }
+                            ? { ...a, picked: e.target.checked ? [...a.picked, o.label] : a.picked.filter((p) => p !== o.label) }
                             : { picked: [o.label] },
                         )
                       }
@@ -92,16 +92,21 @@ export function QuestionCard({ sessionId, questions, onOpenTerminal }: { session
                     </QuestionnaireChoice>
                   ))}
                   {/* Your own answer: what Claude's menu calls "Type something". */}
-                  {!q.multiSelect && (
-                    <QuestionnaireChoice value={OTHER} checked={other} onChange={() => set(i, () => ({ picked: [], other: "" }))} data-testid="question-other">
-                      Something else
-                    </QuestionnaireChoice>
-                  )}
+                  <QuestionnaireChoice
+                    value={OTHER}
+                    checked={other}
+                    onChange={(e) =>
+                      set(i, (a) => (q.multiSelect ? { picked: a.picked, other: e.target.checked ? "" : undefined } : { picked: [], other: "" }))
+                    }
+                    data-testid="question-other"
+                  >
+                    Something else
+                  </QuestionnaireChoice>
                 </QuestionnaireChoices>
                 {other && (
                   <QuestionnaireInput
                     value={a.other}
-                    onChange={(e) => set(i, () => ({ picked: [], other: e.target.value }))}
+                    onChange={(e) => set(i, (a) => ({ picked: q.multiSelect ? a.picked : [], other: e.target.value }))}
                     placeholder="Your answer"
                     autoFocus
                     data-testid="question-other-text"

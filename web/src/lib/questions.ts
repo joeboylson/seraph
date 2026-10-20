@@ -34,7 +34,9 @@ export function pendingQuestions(events: HookEvent[]): { id: string; questions: 
  *   the only question);
  * - your own words: the number after the options ("Type something"), the
  *   text, then Enter;
- * - pick several: each option's number toggles it, then Tab moves on;
+ * - pick several: each option's number toggles it, then Tab moves on; with
+ *   your own words too, also tick "Type something", move down to it, type,
+ *   then Tab and Enter;
  * - with several questions, or any pick-several one, a review step follows:
  *   1 submits.
  */
@@ -43,7 +45,13 @@ export function answerKeys(questions: Question[], answers: Answer[]): ({ keys: s
   questions.forEach((q, i) => {
     const a = answers[i] ?? { picked: [] }
     const number = (label: string) => String(q.options.findIndex((o) => o.label === label) + 1)
-    if (q.multiSelect) {
+    if (q.multiSelect && a.other?.trim()) {
+      // Tick "Type something" too, then move the cursor (still on the first
+      // option) down to it to type; Tab and Enter finish the question. Tab
+      // and Enter go apart: sent together, Enter lands before Tab is done.
+      const typeIt = String(q.options.length + 1)
+      steps.push({ keys: [...a.picked.map(number), typeIt] }, { keys: Array(q.options.length).fill("Down") }, { data: a.other.trim() }, { keys: ["Tab"] }, { keys: ["Enter"] })
+    } else if (q.multiSelect) {
       steps.push({ keys: [...a.picked.map(number), "Tab"] })
     } else if (a.other?.trim()) {
       steps.push({ keys: [String(q.options.length + 1)] }, { data: a.other.trim() }, { keys: ["Enter"] })

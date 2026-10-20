@@ -688,17 +688,30 @@ test("Claude's questions show as a card, and answering types the right keys", as
   })
   const card = page.getByTestId("question-card")
   await expect(card).toContainText("Which pet?")
-  await card.getByTestId("question-other").click()
-  await card.getByTestId("question-other-text").fill("A parrot")
+  await card.getByTestId("question-other").filter({ visible: true }).click()
+  await card.getByTestId("question-other-text").filter({ visible: true }).fill("A parrot")
   await card.getByRole("button", { name: "Next" }).click()
   await card.getByTestId("question-option").filter({ hasText: "Small" }).click()
   await card.getByTestId("question-option").filter({ hasText: "Large" }).click()
+  await card.getByTestId("question-other").filter({ visible: true }).click()
+  await card.getByTestId("question-other-text").filter({ visible: true }).fill("XL")
   await card.getByTestId("question-submit").click()
 
-  // "Type something" is option 3: pick it, type, Enter; then tick 1 and 3, Tab; then submit.
+  // Pet: "Type something" is option 3: pick it, type, Enter. Sizes: tick 1, 3
+  // and "Type something" (4), move down to it, type, Tab, Enter. Then submit.
   await expect
     .poll(async () => (await db.from("commands").select("payload").eq("session_id", session.id).eq("kind", "keys").order("id")).data?.map((c) => c.payload))
-    .toEqual([{ keys: ["3"] }, { data: "A parrot" }, { keys: ["Enter"] }, { keys: ["1", "3", "Tab"] }, { keys: ["1"] }])
+    .toEqual([
+      { keys: ["3"] },
+      { data: "A parrot" },
+      { keys: ["Enter"] },
+      { keys: ["1", "3", "4"] },
+      { keys: ["Down", "Down", "Down"] },
+      { data: "XL" },
+      { keys: ["Tab"] },
+      { keys: ["Enter"] },
+      { keys: ["1"] },
+    ])
 
   // Once Claude has the answer, the card goes.
   await db.from("events").insert({ session_id: "claude-1", csc_session: session.id, hook_event: "PostToolUse", payload: { tool_name: "AskUserQuestion", tool_use_id: "tu_q1" } })
