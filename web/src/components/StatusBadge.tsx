@@ -25,6 +25,11 @@ const DOT: Record<Shown, string> = {
   paused: "bg-info",
 }
 
+/** Just the colored dot, for tight spots like the pinned tabs. */
+export function StatusDot({ status, className }: { status: Shown; className?: string }) {
+  return <span className={cn("size-2 shrink-0 rounded-full", DOT[status], className)} title={LABELS[status]} aria-label={LABELS[status]} />
+}
+
 export function StatusBadge({ status, className }: { status: Shown; className?: string }) {
   return (
     <Badge variant="outline" className={cn("label gap-s2 normal-case", className)} data-status={status}>

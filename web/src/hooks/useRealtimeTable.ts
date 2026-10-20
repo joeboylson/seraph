@@ -8,6 +8,8 @@ type Options = {
   ascending?: boolean
   limit?: number
   enabled?: boolean
+  /** How often to reload in case Realtime missed a change. */
+  resyncMs?: number
 }
 
 /**
@@ -15,7 +17,7 @@ type Options = {
  * Rows are matched on `key` for updates and deletes.
  */
 export function useRealtimeTable<T extends Record<string, unknown>>(
-  { table, filter, order = "id", ascending = true, limit = 2000, enabled = true }: Options,
+  { table, filter, order = "id", ascending = true, limit = 2000, enabled = true, resyncMs = 30_000 }: Options,
   key: keyof T = "id",
 ) {
   const [rows, setRows] = useState<T[]>([])
@@ -71,21 +73,25 @@ export function useRealtimeTable<T extends Record<string, unknown>>(
       })
     }
 
-    // Realtime can drop changes when the database is struggling, so resync
-    // now and then too.
     loadRef.current = load
-    const resync = setInterval(load, 30_000)
     // A phone pauses the page while it sleeps; catch up as soon as it's back.
     const onVisible = () => document.visibilityState === "visible" && load()
     document.addEventListener("visibilitychange", onVisible)
 
     return () => {
       cancelled = true
-      clearInterval(resync)
       document.removeEventListener("visibilitychange", onVisible)
       db.removeChannel(channel)
     }
   }, [table, filterColumn, filterValue, order, ascending, limit, enabled, key])
+
+  // Realtime can drop changes when the database is struggling, so resync
+  // now and then too. Its own effect: a new pace mustn't reload from empty.
+  useEffect(() => {
+    if (!enabled) return
+    const resync = setInterval(() => loadRef.current(), resyncMs)
+    return () => clearInterval(resync)
+  }, [enabled, resyncMs])
 
   const reload = useCallback(() => loadRef.current(), [])
   return { rows, loading, reload }

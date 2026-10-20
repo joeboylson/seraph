@@ -117,7 +117,9 @@ const CLOCK_SLACK_MS = 60_000
  * the moment it's sent. A message stays until the conversation shows it:
  * one that's still queued or failed is never hidden. Slash commands are the
  * exception: some never reach the transcript (a /cost panel closed with
- * Esc), so once sent they go when the conversation moves past them.
+ * Esc), so once sent they go when the conversation moves past them. And
+ * once Claude has written anything after a message was delivered, it goes
+ * too: the transcript doesn't always repeat it word for word.
  */
 function unechoed(sent: Sent[], items: Item[], messages: MessageRow[]) {
   // Each line in the conversation can stand for one sent message, sent
@@ -138,6 +140,10 @@ function unechoed(sent: Sent[], items: Item[], messages: MessageRow[]) {
     }
     if (c.status !== "done") return true
     if (text.startsWith("/")) return !latest || at > latest
+    // Delivered, and Claude has written since: it's in the conversation, if
+    // not word for word (attached images add their paths, for one).
+    const delivered = c.done_at ? new Date(c.done_at).getTime() : at
+    if (latest > delivered + CLOCK_SLACK_MS / 6) return false
     // Older than everything still kept: it was shown once, before older
     // lines were cleared out.
     return !(oldest && at < oldest - CLOCK_SLACK_MS)

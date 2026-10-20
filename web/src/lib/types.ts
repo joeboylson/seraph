@@ -84,6 +84,8 @@ export type Command = {
   status: "pending" | "done" | "failed"
   result: unknown
   error: string | null
+  /** When the session took it: for a prompt, when it was typed into Claude. */
+  done_at?: string | null
 }
 
 export type Controller = { id: string; hostname: string; home: string; last_seen: string }

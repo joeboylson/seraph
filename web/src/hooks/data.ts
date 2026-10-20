@@ -12,12 +12,14 @@ export function useSessions() {
   return { sessions, loading, reload }
 }
 
-export function useMessages(sessionId: string) {
-  // Newest first, so a long session loads its latest messages.
+export function useMessages(sessionId: string, working = false) {
+  // Newest first, so a long session loads its latest messages. While Claude
+  // works, check often, so the chat never trails the terminal for long.
   const { rows, loading } = useRealtimeTable<MessageRow>({
     table: "messages",
     filter: { column: "session_id", value: sessionId },
     ascending: false,
+    resyncMs: working ? 5_000 : 30_000,
   })
   const messages = useMemo(() => rows.slice().sort((a, b) => a.id - b.id), [rows])
   return { messages, loading }

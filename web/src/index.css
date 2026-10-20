@@ -175,11 +175,14 @@
   }
 }
 
+/* Reduce Motion: no movement. Animations end at once and don't repeat; a
+ * looping one (a pulsing dot, a spinner) would otherwise flash nonstop. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

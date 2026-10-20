@@ -609,3 +609,58 @@ test("a message sent while Claude is busy never disappears, and shows once when 
   await expect(page.getByTestId("sent")).toHaveCount(0)
   await expect(page.getByTestId("chat").getByText("also add a reset button")).toHaveCount(1)
 })
+
+test("with Reduce Motion on, the working dot doesn't flash", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  await db.from("sessions").update({ status: "working" }).eq("id", session.id)
+  await page.goto(`/#/s/${session.id}`)
+  const dot = page.getByTestId("session-title").locator("..").locator('[data-status="working"] span').first()
+  await expect(dot).toBeVisible()
+  expect(await dot.evaluate((el) => getComputedStyle(el).animationIterationCount)).toBe("1")
+})
+
+test("a delivered message that Claude wrote down differently doesn't hang at the end", async ({ page }) => {
+  await page.goto(`/#/s/${session.id}`)
+  await page.getByTestId("composer").fill("look at this picture")
+  await page.getByTestId("send").click()
+  await expect(page.getByTestId("sent")).toBeVisible()
+  // Typed in, but the transcript has it with the image's path added.
+  await db.from("commands").update({ status: "done", done_at: new Date().toISOString() }).eq("session_id", session.id).eq("kind", "prompt")
+  const later = new Date(Date.now() + 20_000).toISOString()
+  await addMessages(session.id, [
+    { type: "user", timestamp: later, message: { role: "user", content: "look at this picture /tmp/seraph/uploads/1.png" } },
+    { type: "assistant", timestamp: later, message: { role: "assistant", content: [{ type: "text", text: "It's red." }] } },
+  ])
+  await db.from("messages").update({ ts: later }).eq("session_id", session.id)
+  await expect(page.getByTestId("chat")).toContainText("It's red.")
+  await expect(page.getByTestId("sent")).toHaveCount(0)
+})
+
+test("up to five sessions pin as tabs at the top and switch with a tap", async ({ page }) => {
+  const others = await Promise.all(Array.from({ length: 5 }, (_, i) => fakeSession({ name: `pin ${i + 1}` })))
+  try {
+    const tabs = page.getByTestId("pinned-tab")
+    for (const s of others) {
+      await page.goto(`/#/s/${s.id}`)
+      await page.getByTestId("pin").click()
+    }
+    await expect(tabs).toHaveCount(5)
+    // A sixth can't be pinned until one is unpinned.
+    await page.goto(`/#/s/${session.id}`)
+    await expect(page.getByTestId("pin")).toBeDisabled()
+
+    await tabs.filter({ hasText: "pin 2" }).click()
+    await expect(page.getByTestId("session-title")).toHaveText("pin 2")
+    await expect(tabs.filter({ hasText: "pin 2" })).toHaveAttribute("data-state", "active")
+
+    // Pins survive a reload; unpinning from the tab removes it.
+    await page.reload()
+    await expect(tabs).toHaveCount(5)
+    await tabs.filter({ hasText: "pin 2" }).getByTestId("unpin-tab").click()
+    await expect(tabs).toHaveCount(4)
+    await expect(page.getByTestId("pin")).toHaveAttribute("aria-pressed", "false")
+  } finally {
+    await page.evaluate(() => localStorage.removeItem("seraph:pins"))
+    await Promise.all(others.map((o) => removeSession(o.id)))
+  }
+})

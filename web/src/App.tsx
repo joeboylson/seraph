@@ -8,10 +8,12 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 import { Toaster } from "@/components/ui/sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { NewSessionDialog } from "@/components/NewSessionDialog"
+import { PinnedTabs } from "@/components/PinnedTabs"
 import { SessionList } from "@/components/SessionList"
 import { SessionView } from "@/components/SessionView"
 import { useConnected, useMachines, useSessions } from "@/hooks/data"
 import { useNotifications } from "@/hooks/useNotifications"
+import { MAX_PINS, usePins } from "@/hooks/usePins"
 import { onCommandError } from "@/lib/commands"
 import { signOut } from "@/lib/push"
 
@@ -34,6 +36,12 @@ export default function App() {
   const connected = useConnected()
   const [selectedId, select] = useHashSession()
   const [newOpen, setNewOpen] = useState(false)
+  const { pins, toggle: togglePin, prune: prunePins } = usePins()
+
+  // A deleted session's tab goes too.
+  useEffect(() => {
+    if (!loading) prunePins(new Set(sessions.map((s) => s.id)))
+  }, [loading, sessions, prunePins])
 
   useEffect(() => onCommandError((message) => toast.error(message, { duration: 8000 })), [])
 
@@ -67,20 +75,25 @@ export default function App() {
       />
       <SidebarInset className="min-h-0 min-w-0 overflow-hidden px-s4 md:px-s5">
         <header className="flex shrink-0 items-center justify-between gap-s4 py-s4">
-          <div className="flex items-center gap-s3">
-            <SidebarTrigger className="-ml-s2" aria-label="Sessions" title="Sessions" />
-            <span className="font-medium">Seraph</span>
+          <div className="flex min-w-0 items-center gap-s3">
+            <SidebarTrigger className="-ml-s2 shrink-0" aria-label="Sessions" title="Sessions" />
+            {pins.length ? (
+              <PinnedTabs sessions={sessions} pins={pins} selectedId={selectedId} onSelect={select} onUnpin={togglePin} />
+            ) : (
+              <span className="font-medium">Seraph</span>
+            )}
           </div>
-          <div className="flex items-center gap-s4">
+          <div className="flex shrink-0 items-center gap-s4">
             {notifications.ask && (
               <Button variant="ghost" size="sm" className="rounded-full" onClick={notifications.ask}>
                 <BellIcon /> Notify me
               </Button>
             )}
             {connected ? (
-              <Badge variant="outline" className="label min-w-0 shrink gap-s2" data-testid="controller-status" data-online={online}>
+              <Badge variant="outline" className="label min-w-0 shrink gap-s2" title={machines.map((m) => m.id).join(", ")} data-testid="controller-status" data-online={online}>
                 <span className={`size-2 shrink-0 rounded-full ${online ? "bg-success" : "bg-destructive"}`} aria-hidden />
-                <span className="truncate" title={machines.map((m) => m.id).join(", ")}>
+                {/* On a phone, just the dot: the room goes to the pinned tabs. */}
+                <span className={pins.length ? "hidden truncate sm:inline" : "truncate"}>
                   {machines.length > 1 ? `${machines.length} computers` : online ? machines[0].id : "Controller offline"}
                 </span>
               </Badge>
@@ -101,7 +114,15 @@ export default function App() {
 
         <div className="flex min-h-0 flex-1 flex-col pt-s5">
           {selected ? (
-            <SessionView key={selected.id} session={selected} onOpen={select} onDeleted={() => (location.hash = "")} />
+            <SessionView
+              key={selected.id}
+              session={selected}
+              onOpen={select}
+              onDeleted={() => (location.hash = "")}
+              pinned={pins.includes(selected.id)}
+              canPin={pins.length < MAX_PINS}
+              onTogglePin={() => togglePin(selected.id)}
+            />
           ) : loading || selectedId ? (
             <Empty>
               <EmptyHeader>

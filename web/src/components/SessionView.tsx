@@ -1,4 +1,4 @@
-import { PauseIcon, PencilIcon, PowerIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon } from "lucide-react"
+import { PauseIcon, PencilIcon, PinIcon, PinOffIcon, PowerIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import {
@@ -191,7 +191,21 @@ function RenameButton({ session }: { session: Session }) {
   )
 }
 
-export function SessionView({ session, onOpen, onDeleted }: { session: Session; onOpen: (id: string) => void; onDeleted: () => void }) {
+export function SessionView({
+  session,
+  onOpen,
+  onDeleted,
+  pinned,
+  canPin,
+  onTogglePin,
+}: {
+  session: Session
+  onOpen: (id: string) => void
+  onDeleted: () => void
+  pinned: boolean
+  canPin: boolean
+  onTogglePin: () => void
+}) {
   const ended = session.status === "ended"
   // Paused: Claude is stopped (or stopping) but the session waits to be resumed.
   const paused = !!session.paused_at
@@ -201,7 +215,7 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
   // Only sessions started from the page can be restarted from it; a terminal's
   // session belongs to that terminal.
   const headless = session.mode === "headless"
-  const { messages, loading } = useMessages(session.id)
+  const { messages, loading } = useMessages(session.id, session.status === "working")
   const events = useSessionEvents(session.id)
   const sent = useSentPrompts(session.id)
   const mirror = useMemo(
@@ -274,6 +288,19 @@ export function SessionView({ session, onOpen, onDeleted }: { session: Session; 
         <div className="flex min-w-0 items-center gap-s4">
           <h1 className="min-w-0 truncate text-title font-medium tracking-[-0.03em]" data-testid="session-title">{sessionTitle(session)}</h1>
           <RenameButton session={session} />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="-ml-s3 shrink-0 text-muted-foreground"
+            onClick={onTogglePin}
+            disabled={!pinned && !canPin}
+            aria-pressed={pinned}
+            aria-label={pinned ? "Unpin from the top" : "Pin to the top"}
+            title={pinned ? "Unpin from the top" : canPin ? "Pin to the top" : "Five are pinned. Unpin one first."}
+            data-testid="pin"
+          >
+            {pinned ? <PinOffIcon /> : <PinIcon />}
+          </Button>
           <StatusBadge status={shownStatus(session)} className="shrink-0" />
         </div>
         {/* Cut from the left so the project folder stays visible. */}
