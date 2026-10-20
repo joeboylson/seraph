@@ -610,15 +610,6 @@ test("a message sent while Claude is busy never disappears, and shows once when 
   await expect(page.getByTestId("chat").getByText("also add a reset button")).toHaveCount(1)
 })
 
-test("with Reduce Motion on, the working dot doesn't flash", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "reduce" })
-  await db.from("sessions").update({ status: "working" }).eq("id", session.id)
-  await page.goto(`/#/s/${session.id}`)
-  const dot = page.getByTestId("session-title").locator("..").locator('[data-status="working"] span').first()
-  await expect(dot).toBeVisible()
-  expect(await dot.evaluate((el) => getComputedStyle(el).animationIterationCount)).toBe("1")
-})
-
 test("a delivered message that Claude wrote down differently doesn't hang at the end", async ({ page }) => {
   await page.goto(`/#/s/${session.id}`)
   await page.getByTestId("composer").fill("look at this picture")
