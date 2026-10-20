@@ -39,7 +39,7 @@ else
   else
     base="https://github.com/$repo/releases/latest/download"
   fi
-  echo "Downloading seraph for $target…"
+  echo "Downloading seraph for ${target}…"
   curl -fsSL "$base/seraph-$target" -o "$new"
   want="$(curl -fsSL "$base/seraph-$target.sha256" | cut -d' ' -f1)"
   if command -v shasum >/dev/null; then got="$(shasum -a 256 "$new" | cut -d' ' -f1)"; else got="$(sha256sum "$new" | cut -d' ' -f1)"; fi
