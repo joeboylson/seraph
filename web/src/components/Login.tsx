@@ -34,13 +34,12 @@ export function Login() {
       options: { shouldCreateUser: false, emailRedirectTo: `${location.origin}/` },
     })
     setBusy(false)
-    // Sign-ups are off, so an unknown address comes back as "signups not allowed".
-    if (error?.code === "otp_disabled" || error?.code === "signup_disabled") {
-      setError(`${email.trim()} can't sign in here. On your computer, run: seraph user add ${email.trim()}`)
-    } else if (error?.code === "over_email_send_rate_limit") {
+    // Sign-ups are off, so an unknown address comes back as "signups not
+    // allowed". Say only that it failed: nothing about who may sign in or how.
+    if (error?.code === "over_email_send_rate_limit") {
       setError("A code was sent moments ago. Wait a few seconds, then try again.")
     } else if (error) {
-      setError(error.message)
+      setError("Sign-in failed.")
     } else {
       try {
         localStorage.setItem(EMAIL_KEY, email.trim())

@@ -9,7 +9,7 @@ import { db } from "@/lib/supabase"
 // Loaded only once signed in, so nothing subscribes to data before then.
 const App = lazy(() => import("@/App"))
 
-type State = { kind: "loading" } | { kind: "signed-out" } | { kind: "not-member"; email?: string } | { kind: "in" } | { kind: "error"; message: string }
+type State = { kind: "loading" } | { kind: "signed-out" } | { kind: "not-member" } | { kind: "in" } | { kind: "error"; message: string }
 
 /** Shows the login screen until someone on the members list signs in. */
 export function AuthGate() {
@@ -20,7 +20,7 @@ export function AuthGate() {
       if (!session) return setState({ kind: "signed-out" })
       const { data, error } = await db.rpc("is_member")
       if (error) setState({ kind: "error", message: error.message })
-      else setState(data ? { kind: "in" } : { kind: "not-member", email: session.user.email })
+      else setState(data ? { kind: "in" } : { kind: "not-member" })
     }
     const { data } = db.auth.onAuthStateChange((event, session) => {
       // Token refreshes don't change who's signed in. Calling Supabase from
@@ -41,21 +41,11 @@ export function AuthGate() {
   return (
     <Empty className="min-h-dvh">
       <EmptyHeader className="max-w-[610px]">
-        <p className="label">{state.kind === "error" ? "Can't connect" : "Not allowed"}</p>
         <EmptyTitle>
-          <h1 className="text-title font-medium tracking-[-0.03em]">
-            {state.kind === "error" ? "Couldn't check your account" : `${state.email ?? "This account"} can't use this page`}
-          </h1>
+          {/* Not on the members list: say only that it failed. */}
+          <h1 className="text-title font-medium tracking-[-0.03em]">{state.kind === "error" ? "Couldn't check your account" : "Sign-in failed."}</h1>
         </EmptyTitle>
-        <EmptyDescription className="text-lead">
-          {state.kind === "error" ? (
-            state.message
-          ) : (
-            <>
-              On your computer, run <code className="font-mono">seraph user add {state.email}</code>, then sign in again.
-            </>
-          )}
-        </EmptyDescription>
+        {state.kind === "error" && <EmptyDescription className="text-lead">{state.message}</EmptyDescription>}
       </EmptyHeader>
       <EmptyContent>
         <Button variant="outline" className="rounded-full" onClick={() => signOut()}>

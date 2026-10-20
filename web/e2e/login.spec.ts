@@ -8,7 +8,7 @@ test("an address without an account can't get a code", async ({ page }) => {
   await page.goto("/")
   await page.getByTestId("login-email").fill("nobody@test.invalid")
   await page.getByRole("button", { name: "Send code" }).click()
-  await expect(page.getByRole("alert")).toContainText("seraph user add nobody@test.invalid")
+  await expect(page.getByRole("alert")).toHaveText("Sign-in failed.")
   await expect(page.getByTestId("login-code")).toBeHidden()
 })
 
@@ -45,8 +45,9 @@ test("an account that isn't a member is turned away", async ({ page }) => {
     await requestCode(page, email)
     await page.getByTestId("login-code").fill(await signInCode(email))
     await page.getByRole("button", { name: "Sign in" }).click()
-    await expect(page.getByRole("heading")).toContainText("can't use this page")
-    await expect(page.getByText(`seraph user add ${email}`)).toBeVisible()
+    await expect(page.getByRole("heading")).toHaveText("Sign-in failed.")
+    await expect(page.getByText(email)).toHaveCount(0)
+    await expect(page.getByText("seraph user add")).toHaveCount(0)
     await page.getByRole("button", { name: "Sign out" }).click()
     await expect(page.getByTestId("login-email")).toBeVisible()
   } finally {
