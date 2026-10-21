@@ -103,16 +103,45 @@ pub fn finish_command(cmd_id: i64, result: Option<Value>, error: Option<String>)
     )
 }
 
+/// Seconds within which the same message is written only once.
+const LOG_REPEAT_SECS: u64 = 60;
+
+/// Messages this process logged lately: when each was last written, and
+/// how often it came up since.
+static RECENT: std::sync::Mutex<Option<std::collections::HashMap<String, (std::time::Instant, u32)>>> = std::sync::Mutex::new(None);
+
+/// Append a line to seraph.log. Many processes share the file, so each line
+/// goes out in one write and lines don't interleave. A message repeating
+/// (say, every poll while the network is down) is written once a minute,
+/// with how many times it came up in between.
 pub fn log(msg: impl AsRef<str>) {
+    let msg = msg.as_ref();
+    let repeats = {
+        let mut recent = RECENT.lock().unwrap_or_else(|e| e.into_inner());
+        let recent = recent.get_or_insert_with(Default::default);
+        let now = std::time::Instant::now();
+        recent.retain(|_, (at, _)| now.duration_since(*at).as_secs() < LOG_REPEAT_SECS * 10);
+        match recent.get_mut(msg) {
+            Some((at, skipped)) if now.duration_since(*at).as_secs() < LOG_REPEAT_SECS => {
+                *skipped += 1;
+                return;
+            }
+            Some((at, skipped)) => {
+                let n = std::mem::take(skipped);
+                *at = now;
+                n
+            }
+            None => {
+                recent.insert(msg.to_string(), (now, 0));
+                0
+            }
+        }
+    };
+    let more = if repeats > 0 { format!(" (and {repeats} more times in the last minute)") } else { String::new() };
+    let line = format!("{} [{}] {msg}{more}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), std::process::id());
     let _ = fs::create_dir_all(config::home());
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(config::log_path()) {
-        let _ = writeln!(
-            f,
-            "{} [{}] {}",
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-            std::process::id(),
-            msg.as_ref()
-        );
+        let _ = f.write_all(line.as_bytes());
     }
 }
 
@@ -136,4 +165,23 @@ pub fn probe(url: &str, key: &str, path: &str, method: &str, body: Option<&Value
     };
     let parsed = serde_json::from_str(&text).unwrap_or(if text.is_empty() { Value::Null } else { Value::String(text) });
     (status, parsed)
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::*;
+
+    #[test]
+    fn a_repeating_message_is_written_once() {
+        let home = std::env::temp_dir().join(format!("seraph-log-test-{}", std::process::id()));
+        std::env::set_var("SERAPH_HOME", &home);
+        for _ in 0..3 {
+            log("network down");
+        }
+        log("something else");
+        let text = fs::read_to_string(config::log_path()).unwrap();
+        let _ = fs::remove_dir_all(&home);
+        assert_eq!(text.lines().filter(|l| l.ends_with("] network down")).count(), 1);
+        assert_eq!(text.lines().count(), 2);
+    }
 }
