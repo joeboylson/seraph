@@ -24,11 +24,11 @@ test("a wrong code is refused, the right one signs in, and sign out goes back", 
 
     await page.getByTestId("login-code").fill(await signInCode(email))
     await page.getByRole("button", { name: "Sign in" }).click()
-    await expect(page.getByTestId("controller-status")).toBeVisible()
+    await expect(page.getByRole("button", { name: "Sessions" })).toBeVisible()
 
     // Still signed in after a reload.
     await page.reload()
-    await expect(page.getByTestId("controller-status")).toBeVisible()
+    await expect(page.getByRole("button", { name: "Sessions" })).toBeVisible()
 
     await page.getByRole("button", { name: "Sign out" }).click()
     await expect(page.getByTestId("login-email")).toHaveValue(email)

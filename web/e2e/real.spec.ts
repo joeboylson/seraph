@@ -46,17 +46,17 @@ test("build a small app from the web page @real", async ({ page }) => {
 
   // 1. Start a session in a new folder, with a first message.
   await page.goto("/")
-  await expect(page.getByTestId("controller-status")).toHaveAttribute("data-online", "true")
   await page.getByTestId("new-session").first().click()
+  await expect(page.getByTestId("folders").getByTestId("folder").first()).toBeVisible()
   const cwd = page.getByTestId("cwd")
   await cwd.fill(SANDBOX)
   await cwd.press("Enter")
   await expect(cwd).toHaveValue(SANDBOX)
   await page.getByTestId("new-folder").fill(folder)
-  await page.getByRole("combobox").first().click()
+  await page.getByLabel("Model").click()
   await page.getByRole("option", { name: "Haiku" }).click()
   // Ask before edits, so the permission flow gets exercised.
-  await page.getByRole("combobox").nth(1).click()
+  await page.getByLabel("Permissions").click()
   await page.getByRole("option", { name: "Ask before edits" }).click()
   await page.getByTestId("session-name").fill(`counter ${folder}`)
   await page.getByTestId("first-prompt").fill(

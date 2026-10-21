@@ -35,16 +35,32 @@ export function useSessionEvents(sessionId: string) {
   return useMemo(() => rows.slice().sort((a, b) => a.id - b.id), [rows])
 }
 
-/** The daemon checks in every 10s; allow for a slow database before calling it offline. */
-/** The computers whose controller has checked in lately, by name. */
-export function useMachines() {
+/** A controller checks in every 10 minutes; seen within the hour (and not stopped) is active. */
+export const ACTIVE_MS = 60 * 60 * 1000
+
+export type Device = Controller & { active: boolean }
+
+/** Every computer that has run seraph, active ones first, then by name. */
+export function useDevices(): Device[] {
   const { rows } = useRealtimeTable<Controller>({ table: "controllers", order: "last_seen" }, "id")
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 5000)
+    const t = setInterval(() => setNow(Date.now()), 30_000)
     return () => clearInterval(t)
   }, [])
-  return useMemo(() => rows.filter((c) => now - new Date(c.last_seen).getTime() < 90_000).sort((a, b) => a.id.localeCompare(b.id)), [rows, now])
+  return useMemo(
+    () =>
+      rows
+        .map((c) => ({ ...c, active: !c.stopped_at && now - new Date(c.last_seen).getTime() < ACTIVE_MS }))
+        .sort((a, b) => Number(b.active) - Number(a.active) || a.id.localeCompare(b.id)),
+    [rows, now],
+  )
+}
+
+/** The active computers: the ones the page can start and resume sessions on. */
+export function useMachines(): Device[] {
+  const devices = useDevices()
+  return useMemo(() => devices.filter((d) => d.active), [devices])
 }
 
 /** False while this page has lost its live connection to Supabase. */

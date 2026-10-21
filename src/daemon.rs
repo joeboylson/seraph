@@ -369,11 +369,16 @@ fn serve(request: tiny_http::Request) {
 
 // ---- upkeep -----------------------------------------------------------------
 
+/// How often a controller checks in. A device seen within ACTIVE_SECS
+/// (and not stopped) counts as active.
+const HEARTBEAT_SECS: u64 = 600;
+pub const ACTIVE_SECS: f64 = 3600.0;
+
 fn heartbeat(controller_id: &str) -> Result<()> {
     api(
         "POST",
         "/rest/v1/controllers?on_conflict=id",
-        Some(&json!({ "id": controller_id, "hostname": controller_id, "home": config::user_home(), "last_seen": now(), "version": crate::VERSION })),
+        Some(&json!({ "id": controller_id, "hostname": controller_id, "home": config::user_home(), "last_seen": now(), "stopped_at": null, "version": crate::VERSION })),
         Some("resolution=merge-duplicates,return=minimal"),
     )?;
     Ok(())
@@ -508,7 +513,7 @@ pub fn cmd_daemon() -> Result<i32> {
     log(format!("daemon: started, seraph {} as {controller_id}", crate::VERSION));
 
     let (mut last_beat, mut last_purge, mut last_watch) = (None, None, None);
-    let (mut last_ship, mut last_prune) = (None, None);
+    let (mut last_ship, mut last_prune, mut last_dead_check) = (None, None, None);
     let mut watcher = push::Watcher::default();
     while !stop.load(Ordering::Relaxed) {
         if every(&mut last_watch, 3) {
@@ -525,8 +530,11 @@ pub fn cmd_daemon() -> Result<i32> {
         if every(&mut last_prune, 3600) {
             run_steps(&controller_id, &[("prune_logs", crate::logship::prune)]);
         }
-        if every(&mut last_beat, 10) {
-            run_steps(&controller_id, &[("heartbeat", heartbeat), ("end_dead_sessions", end_dead_sessions)]);
+        if every(&mut last_beat, HEARTBEAT_SECS) {
+            run_steps(&controller_id, &[("heartbeat", heartbeat)]);
+        }
+        if every(&mut last_dead_check, 10) {
+            run_steps(&controller_id, &[("end_dead_sessions", end_dead_sessions)]);
         }
         if let Err(e) = run_requests(&controller_id) {
             log(format!("daemon: {e}"));
@@ -540,6 +548,10 @@ pub fn cmd_daemon() -> Result<i32> {
     }
     // A clean exit, so launchd/systemd don't restart it after `seraph stop`.
     log("daemon: stopping");
+    // Inactive straight away, rather than an hour from now.
+    if let Err(e) = update("controllers", &format!("id=eq.{}", quote(&controller_id)), &json!({ "stopped_at": now() })) {
+        log(format!("daemon stopped_at: {e}"));
+    }
     // Send what's left, so the last lines before a stop aren't held back.
     if let Err(e) = crate::logship::ship(&controller_id) {
         log(format!("daemon ship_logs: {e}"));

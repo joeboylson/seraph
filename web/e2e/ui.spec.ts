@@ -173,7 +173,6 @@ test("an ended session can't be messaged and offers Resume", async ({ page }) =>
 
 test("the new-session dialog shows the computer's folders as a tree, and picks one", async ({ page }) => {
   await page.goto(`/#/s/${session.id}`)
-  await expect(page.getByTestId("controller-status")).toHaveAttribute("data-online", "true")
   await page.getByTestId("new-session").click()
   await expect(page.getByTestId("machine")).toBeVisible()
   const tree = page.getByTestId("folders")
@@ -391,11 +390,12 @@ test("a subagent's report reads as formatted text, and tapping the model opens /
 
 test("losing the connection shows Reconnecting until it's back", async ({ page, context }) => {
   await page.goto(`/#/s/${session.id}`)
-  await expect(page.getByTestId("controller-status")).toBeVisible()
+  await expect(page.getByTestId("session-title")).toBeVisible()
+  await expect(page.getByTestId("connection-lost")).toHaveCount(0)
   await context.setOffline(true)
   await expect(page.getByTestId("connection-lost")).toBeVisible({ timeout: 10_000 })
   await context.setOffline(false)
-  await expect(page.getByTestId("controller-status")).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByTestId("connection-lost")).toHaveCount(0, { timeout: 30_000 })
 })
 
 test("the Changes tab lists every file Claude changed, without failed edits", async ({ page }) => {
@@ -427,7 +427,6 @@ test("with two computers, the page names them and sends requests only to the one
   await db.from("controllers").upsert({ id: "test-box", hostname: "test-box", home: "/home/test", last_seen: new Date().toISOString() })
   try {
     await page.goto(`/#/s/${session.id}`)
-    await expect(page.getByTestId("controller-status")).toContainText("2 computers")
     await page.getByRole("navigation", { name: "Sessions" }).getByTestId("new-session").click()
     const picker = page.getByTestId("machine")
     await expect(picker).toBeVisible()
@@ -486,8 +485,8 @@ test("the sidebar lists devices, online first, and opens one to show its session
 
     await list.getByTestId("devices-back").click()
     const devices = list.getByTestId("device-item")
-    await expect(devices.filter({ hasText: "box-a" }).getByTitle("Online")).toBeAttached()
-    await expect(devices.filter({ hasText: "box-b" }).getByTitle("Offline")).toBeAttached()
+    await expect(devices.filter({ hasText: "box-a" }).getByTitle("Active")).toBeAttached()
+    await expect(devices.filter({ hasText: "box-b" }).getByTitle("Inactive")).toBeAttached()
     // box-a is online, so it's listed before box-b.
     const names = await devices.allTextContents()
     expect(names.findIndex((n) => n.includes("box-a"))).toBeLessThan(names.findIndex((n) => n.includes("box-b")))
@@ -809,5 +808,42 @@ test("two unnamed sessions in one folder are told apart by when they started", a
   } finally {
     await removeSession(a.id)
     await removeSession(b.id)
+  }
+})
+
+test("a device screen shows if it's active, and starts a session in a folder picked there", async ({ page }) => {
+  const host = (await db.from("controllers").select("id").is("stopped_at", null).order("last_seen", { ascending: false }).limit(1).single()).data!.id
+  // One that stopped, and one not seen for two hours: both inactive.
+  await db.from("controllers").upsert([
+    { id: "old-box", hostname: "old-box", home: "/home/old", last_seen: new Date(Date.now() - 2 * 3600_000).toISOString() },
+    { id: "off-box", hostname: "off-box", home: "/home/off", last_seen: new Date().toISOString(), stopped_at: new Date().toISOString() },
+  ])
+  try {
+    await page.goto(`/#/s/${session.id}`)
+    // No device badge in the header any more.
+    await expect(page.getByTestId("controller-status")).toHaveCount(0)
+    const list = page.getByRole("navigation", { name: "Sessions" })
+    await list.getByTestId("devices-back").click()
+    await expect(list.getByTestId("device-item").filter({ hasText: "old-box" })).toContainText("inactive")
+    await expect(list.getByTestId("device-item").filter({ hasText: "off-box" })).toContainText("inactive")
+
+    await list.getByTestId("device-item").filter({ hasText: "off-box" }).click()
+    await expect(page.getByTestId("device-status")).toHaveText("Inactive")
+    await expect(page.getByTestId("device-inactive")).toContainText("seraph start")
+
+    await list.getByTestId("devices-back").click()
+    await list.getByTestId("device-item").filter({ hasText: host }).click()
+    await expect(page).toHaveURL(new RegExp(`#/d/${encodeURIComponent(host)}$`))
+    await expect(page.getByTestId("device-status")).toHaveText("Active")
+    const tree = page.getByTestId("device-view").getByTestId("folders")
+    await tree.getByTestId("folder-toggle").first().click()
+    const folder = tree.getByTestId("folder").nth(1)
+    const picked = await folder.getAttribute("data-path")
+    await folder.click()
+    await page.getByTestId("device-new-session").click()
+    await expect(page.getByTestId("cwd")).toHaveValue(picked!)
+    await expect(page.getByTestId("machine")).toContainText(host)
+  } finally {
+    await db.from("controllers").delete().in("id", ["old-box", "off-box"])
   }
 })

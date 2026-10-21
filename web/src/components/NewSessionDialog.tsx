@@ -34,12 +34,15 @@ export function NewSessionDialog({
   onOpenChange,
   sessions,
   machines,
+  preset,
   onStarted,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   sessions: Session[]
   machines: Controller[]
+  /** Open on this computer and folder, e.g. from a device's screen. */
+  preset?: { machine: string; cwd: string } | null
   onStarted: (id: string) => void
 }) {
   // Default to the computer of the latest session, if it's on.
@@ -58,14 +61,20 @@ export function NewSessionDialog({
 
   const recent = [...new Set(sessions.filter((s) => s.hostname === machine?.id).map((s) => s.cwd))].slice(0, 6)
 
-  // Each time it opens on a computer, start from its latest session's folder.
+  // Opened from a device's folder: that computer and folder.
+  useEffect(() => {
+    if (open && preset) setChosen(preset.machine)
+  }, [open, preset])
+
+  // Each time it opens on a computer, start from the folder picked on its
+  // screen, or its latest session's folder.
   useEffect(() => {
     if (open && machine) {
-      setCwd(recent[0] ?? "")
+      setCwd(preset?.machine === machine.id ? preset.cwd : (recent[0] ?? ""))
       setError(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, machine?.id])
+  }, [open, machine?.id, preset])
 
   async function start() {
     setBusy(true)

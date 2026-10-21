@@ -1,5 +1,5 @@
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
@@ -16,6 +16,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { cn, timeAgo } from "@/lib/utils"
+import type { Device } from "@/hooks/data"
 import type { Session } from "@/lib/types"
 import { StatusBadge, shownStatus } from "./StatusBadge"
 
@@ -37,32 +38,44 @@ const UNKNOWN = "Unknown computer"
 const deviceOf = (s: Session) => s.hostname ?? UNKNOWN
 
 function OnlineDot({ online }: { online: boolean }) {
-  return <span className={cn("size-2 shrink-0 rounded-full", online ? "bg-success" : "bg-muted-foreground/50")} title={online ? "Online" : "Offline"} aria-hidden />
+  return <span className={cn("size-2 shrink-0 rounded-full", online ? "bg-success" : "bg-muted-foreground/50")} title={online ? "Active" : "Inactive"} aria-hidden />
 }
 
 export function SessionList({
   sessions,
   selectedId,
-  online,
+  devices: known,
+  openDevice,
   onSelect,
+  onOpenDevice,
   onNew,
 }: {
   sessions: Session[]
   selectedId: string | null
-  /** The computers whose controller is running right now. */
-  online: string[]
+  /** Every computer that has run seraph, with whether it's active. */
+  devices: Device[]
+  /** The device whose screen is open, if one is. */
+  openDevice: string | null
   onSelect: (id: string) => void
+  onOpenDevice: (id: string) => void
   onNew: () => void
 }) {
   const { setOpenMobile } = useSidebar()
-  // undefined: follow the open session's device. null: the device list.
+  // undefined: follow what's open (a device's screen, or a session's device). null: the device list.
   const [picked, setPicked] = useState<string | null | undefined>(undefined)
+  useEffect(() => setPicked(undefined), [openDevice])
   const selected = sessions.find((s) => s.id === selectedId)
-  const device = picked === undefined ? (selected ? deviceOf(selected) : null) : picked
+  const device = picked === undefined ? (openDevice ?? (selected ? deviceOf(selected) : null)) : picked
+  const online = known.filter((d) => d.active).map((d) => d.id)
 
-  const devices = [...new Set([...online, ...sessions.map(deviceOf)])].sort(
+  const devices = [...new Set([...known.map((d) => d.id), ...sessions.map(deviceOf)])].sort(
     (a, b) => Number(online.includes(b)) - Number(online.includes(a)) || a.localeCompare(b),
   )
+  const open = (d: string) => {
+    setPicked(d)
+    onOpenDevice(d)
+    setOpenMobile(false)
+  }
 
   return (
     <Sidebar>
@@ -90,10 +103,14 @@ export function SessionList({
                       const running = sessions.filter((s) => deviceOf(s) === d && s.status !== "ended" && !s.paused_at).length
                       return (
                         <SidebarMenuItem key={d}>
-                          <SidebarMenuButton onClick={() => setPicked(d)} data-testid="device-item">
+                          <SidebarMenuButton onClick={() => open(d)} isActive={openDevice === d} data-testid="device-item">
                             <OnlineDot online={online.includes(d)} />
                             <span className="min-w-0 flex-1 truncate">{d}</span>
-                            {running > 0 && <span className="label shrink-0 normal-case">{running} running</span>}
+                            {online.includes(d) ? (
+                              running > 0 && <span className="label shrink-0 normal-case">{running} running</span>
+                            ) : (
+                              <span className="label shrink-0 normal-case">inactive</span>
+                            )}
                             <ChevronRightIcon />
                           </SidebarMenuButton>
                         </SidebarMenuItem>
@@ -117,6 +134,7 @@ export function SessionList({
                 setOpenMobile(false)
               }}
               onBack={() => setPicked(null)}
+              onOpenDevice={() => open(device)}
             />
           )}
         </SidebarContent>
@@ -132,6 +150,7 @@ function DeviceSessions({
   selectedId,
   onSelect,
   onBack,
+  onOpenDevice,
 }: {
   device: string
   online: boolean
@@ -139,6 +158,7 @@ function DeviceSessions({
   selectedId: string | null
   onSelect: (id: string) => void
   onBack: () => void
+  onOpenDevice: () => void
 }) {
   const [query, setQuery] = useState("")
   const [shown, setShown] = useState(20)
@@ -174,10 +194,11 @@ function DeviceSessions({
         <Button variant="ghost" size="sm" className="w-fit rounded-full text-muted-foreground" onClick={onBack} data-testid="devices-back">
           <ChevronLeftIcon /> Devices
         </Button>
-        <p className="flex items-center gap-s2 px-s3 text-sm font-medium" data-testid="device-name">
+        {/* Opens the device's screen: its status and folders. */}
+        <button type="button" onClick={onOpenDevice} className="flex items-center gap-s2 rounded-md px-s3 py-s1 text-left text-sm font-medium hover:bg-sidebar-accent" data-testid="device-name" title={`${device}: status and folders`}>
           <OnlineDot online={online} />
           <span className="truncate">{device}</span>
-        </p>
+        </button>
         {sessions.length > 8 && (
           <SidebarInput type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a session" aria-label="Find a session" data-testid="session-search" />
         )}

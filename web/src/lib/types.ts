@@ -88,4 +88,13 @@ export type Command = {
   done_at?: string | null
 }
 
-export type Controller = { id: string; hostname: string; home: string; last_seen: string }
+export type Controller = {
+  id: string
+  hostname: string
+  home: string
+  /** It checks in every 10 minutes while running. */
+  last_seen: string
+  /** Set when it stopped cleanly; empty while it runs. */
+  stopped_at?: string | null
+  version?: string | null
+}

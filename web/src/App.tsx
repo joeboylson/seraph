@@ -1,5 +1,5 @@
 import { BellIcon, LogOutIcon, PlusIcon } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -8,34 +8,47 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 import { Toaster } from "@/components/ui/sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { NewSessionDialog } from "@/components/NewSessionDialog"
+import { DeviceView } from "@/components/DeviceView"
 import { PinnedTabs } from "@/components/PinnedTabs"
 import { SessionList } from "@/components/SessionList"
 import { SessionView } from "@/components/SessionView"
-import { useConnected, useMachines, useSessions } from "@/hooks/data"
+import { useConnected, useDevices, useSessions } from "@/hooks/data"
 import { useNotifications } from "@/hooks/useNotifications"
 import { MAX_PINS, usePins } from "@/hooks/usePins"
 import { onCommandError } from "@/lib/commands"
 import { signOut } from "@/lib/push"
 
-// The open session lives in the URL hash so links and reloads keep it.
-function useHashSession() {
-  const read = () => location.hash.match(/^#\/s\/([\w-]+)/)?.[1] ?? null
-  const [id, setId] = useState(read)
+// What's open lives in the URL hash so links and reloads keep it:
+// #/s/<session id> for a session, #/d/<computer> for a device.
+function useHashRoute() {
+  const read = () => {
+    const session = location.hash.match(/^#\/s\/([\w-]+)/)?.[1] ?? null
+    const device = location.hash.match(/^#\/d\/(.+)$/)?.[1]
+    return { session, device: device ? decodeURIComponent(device) : null }
+  }
+  const [route, setRoute] = useState(read)
   useEffect(() => {
-    const onHash = () => setId(read())
+    const onHash = () => setRoute(read())
     window.addEventListener("hashchange", onHash)
     return () => window.removeEventListener("hashchange", onHash)
   }, [])
-  return [id, (next: string) => (location.hash = `/s/${next}`)] as const
+  return {
+    route,
+    select: (id: string) => (location.hash = `/s/${id}`),
+    openDevice: (id: string) => (location.hash = `/d/${encodeURIComponent(id)}`),
+  }
 }
 
 export default function App() {
   const { sessions, loading, reload } = useSessions()
-  const machines = useMachines()
-  const online = machines.length > 0
+  const devices = useDevices()
+  const machines = useMemo(() => devices.filter((d) => d.active), [devices])
   const connected = useConnected()
-  const [selectedId, select] = useHashSession()
+  const { route, select, openDevice } = useHashRoute()
+  const selectedId = route.session
   const [newOpen, setNewOpen] = useState(false)
+  // Set when New session comes from a device's folder.
+  const [preset, setPreset] = useState<{ machine: string; cwd: string } | null>(null)
   const { pins, toggle: togglePin, prune: prunePins } = usePins()
 
   // A deleted session's tab goes too.
@@ -57,11 +70,12 @@ export default function App() {
 
   // With nothing chosen, open the most recent running session.
   useEffect(() => {
-    if (!selectedId && sessions.length) {
+    if (!selectedId && !route.device && sessions.length) {
       const first = sessions.find((s) => s.status !== "ended") ?? sessions[0]
       select(first.id)
     }
-  }, [selectedId, sessions, select])
+  }, [selectedId, route.device, sessions, select])
+  const device = route.device ? devices.find((d) => d.id === route.device) : undefined
 
   return (
     // One screen tall: the bars stay put and only the content inside scrolls.
@@ -69,9 +83,14 @@ export default function App() {
       <SessionList
         sessions={sessions}
         selectedId={selectedId}
-        online={machines.map((m) => m.id)}
+        devices={devices}
+        openDevice={route.device}
         onSelect={select}
-        onNew={() => setNewOpen(true)}
+        onOpenDevice={openDevice}
+        onNew={() => {
+          setPreset(null)
+          setNewOpen(true)
+        }}
       />
       <SidebarInset className="min-h-0 min-w-0 overflow-hidden px-s4 md:px-s5">
         <header className="flex shrink-0 items-center justify-between gap-s4 py-s4">
@@ -89,15 +108,7 @@ export default function App() {
                 <BellIcon /> Notify me
               </Button>
             )}
-            {connected ? (
-              <Badge variant="outline" className="label min-w-0 shrink gap-s2" title={machines.map((m) => m.id).join(", ")} data-testid="controller-status" data-online={online}>
-                <span className={`size-2 shrink-0 rounded-full ${online ? "bg-success" : "bg-destructive"}`} aria-hidden />
-                {/* On a phone, just the dot: the room goes to the pinned tabs. */}
-                <span className={pins.length ? "hidden truncate sm:inline" : "truncate"}>
-                  {machines.length > 1 ? `${machines.length} computers` : online ? machines[0].id : "Controller offline"}
-                </span>
-              </Badge>
-            ) : (
+            {!connected && (
               <Badge variant="outline" className="label gap-s2" data-testid="connection-lost" role="status">
                 <Spinner className="size-3 text-warning" />
                 Reconnecting…
@@ -113,7 +124,27 @@ export default function App() {
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col pt-s5">
-          {selected ? (
+          {route.device ? (
+            device ? (
+              <DeviceView
+                key={device.id}
+                device={device}
+                sessions={sessions}
+                onOpen={select}
+                onNewSession={(machine, cwd) => {
+                  setPreset({ machine, cwd })
+                  setNewOpen(true)
+                }}
+              />
+            ) : (
+              <Empty>
+                <EmptyHeader>
+                  <EmptyTitle>No computer called {route.device}</EmptyTitle>
+                  <EmptyDescription>It hasn't run seraph with this Supabase.</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            )
+          ) : selected ? (
             <SessionView
               key={selected.id}
               session={selected}
@@ -153,6 +184,7 @@ export default function App() {
         onOpenChange={setNewOpen}
         sessions={sessions}
         machines={machines}
+        preset={preset}
         onStarted={select}
       />
     </SidebarProvider>

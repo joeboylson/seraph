@@ -315,10 +315,13 @@ pub fn cmd_setup(args: SetupArgs) -> Result<i32> {
     Ok(0)
 }
 
-/// Computers whose controller checked in during the last 90 seconds.
+/// Computers whose controller is running and checked in within the hour.
 pub fn online_computers() -> Result<Vec<Value>> {
-    let rows = crate::supa::select_rows("controllers", "select=id,version,last_seen&order=id")?;
-    Ok(rows.into_iter().filter(|c| c["last_seen"].as_str().is_some_and(|t| age_secs(t) < 90.0)).collect())
+    let rows = crate::supa::select_rows("controllers", "select=id,version,last_seen,stopped_at&order=id")?;
+    Ok(rows
+        .into_iter()
+        .filter(|c| c["stopped_at"].is_null() && c["last_seen"].as_str().is_some_and(|t| age_secs(t) < crate::daemon::ACTIVE_SECS))
+        .collect())
 }
 
 // ---- seraph doctor -------------------------------------------------------------
@@ -409,7 +412,8 @@ fn checks() -> Checks {
     );
     if pid.is_some() {
         let (status, rows) = probe(&url, &secret, &format!("/rest/v1/controllers?id=eq.{}&select=last_seen", quote(&config::machine())), "GET", None);
-        let fresh = status == 200 && rows[0]["last_seen"].as_str().is_some_and(|t| age_secs(t) < 90.0);
+        // It checks in every 10 minutes.
+        let fresh = status == 200 && rows[0]["last_seen"].as_str().is_some_and(|t| age_secs(t) < 900.0);
         c.add(fresh, "Controller checking in", format!("See {}; Supabase may be slow or unreachable.", config::log_path().display()));
     }
     if let Ok(computers) = online_computers() {

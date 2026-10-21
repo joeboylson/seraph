@@ -10,6 +10,6 @@ setup("sign in", async ({ page }) => {
   await requestCode(page, TEST_EMAIL)
   await page.getByTestId("login-code").fill(await signInCode(TEST_EMAIL))
   await page.getByRole("button", { name: "Sign in" }).click()
-  await expect(page.getByTestId("controller-status")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Sessions" })).toBeVisible()
   await page.context().storageState({ path: STATE_PATH })
 })
