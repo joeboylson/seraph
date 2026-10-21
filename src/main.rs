@@ -8,6 +8,7 @@ mod hook;
 mod link;
 mod logship;
 mod push;
+mod releases;
 mod service;
 mod setup;
 mod status;
@@ -52,6 +53,7 @@ Look after it
   seraph db push              install or update the database tables
   seraph uninstall [--purge]  remove seraph from this machine
   seraph update               install the latest release here (or from a device's screen)
+  seraph update --mode ask    when you start seraph and a release is out: ask, auto, or off
   seraph --version            which build this is
 
 Update: ./install.sh in the repo, or rerun the install line on other devices.
@@ -311,7 +313,13 @@ fn dispatch(argv: &[String]) -> Result<i32> {
             Ok(0)
         }
         // These pass their arguments straight through.
-        "claude" => wrapper::cmd_claude(rest),
+        "claude" => {
+            // Like oh-my-zsh: a terminal start may offer a new release first.
+            if !rest.iter().any(|a| a == "--seraph-headless") {
+                releases::offer_update(argv);
+            }
+            wrapper::cmd_claude(rest)
+        }
         "_follow" => link::cmd_follow(rest),
         "_hook" => Ok(hook::cmd_hook(rest)),
         "_status" => Ok(status::cmd_status(rest)),
@@ -359,7 +367,10 @@ fn dispatch(argv: &[String]) -> Result<i32> {
             cmd_tailscale(web_port, off)
         }
         "folders" => folders::cmd_folders(&args.positionals()?),
-        "update" => service::cmd_update(),
+        "update" => match args.value(&["--mode"])? {
+            Some(mode) => releases::set_mode(&mode),
+            None => service::cmd_update(),
+        },
         "user" => match args.positionals()?.as_slice() {
             [action] => users::cmd_user(action, None),
             [action, email] => users::cmd_user(action, Some(email)),
@@ -371,6 +382,7 @@ fn dispatch(argv: &[String]) -> Result<i32> {
             cmd_sessions(limit)
         }
         "resume" => {
+            releases::offer_update(argv);
             // Anything after the query goes to Claude untouched.
             let (query, claude_args) = match rest.first() {
                 Some(q) if !q.starts_with('-') => (Some(q.clone()), rest[1..].to_vec()),

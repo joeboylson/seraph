@@ -23,8 +23,9 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-const KEYS: [&str; 9] = [
+const KEYS: [&str; 10] = [
     "folders",
+    "update_mode",
     "supabase_url",
     "supabase_key",
     "supabase_secret_key",
