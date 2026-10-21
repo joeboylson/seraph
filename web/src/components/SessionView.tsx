@@ -1,4 +1,4 @@
-import { PauseIcon, PencilIcon, PinIcon, PinOffIcon, PowerIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon } from "lucide-react"
+import { PauseIcon, PencilIcon, PinIcon, PinOffIcon, Volume2Icon, VolumeXIcon, PowerIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import {
@@ -16,6 +16,8 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import { Toggle } from "@/components/ui/toggle"
+import { useReadAloud } from "@/hooks/useVoice"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceDescription, TraceLine, TraceTitle } from "@/components/ui/trace"
@@ -287,6 +289,7 @@ export function SessionView({
   // its terminal menu isn't one the screen reader below can follow.
   const asking = useMemo(() => (ended ? null : pendingQuestions(events)), [ended, events])
   const todos = useMemo(() => latestTodos(messages), [messages])
+  const readAloud = useReadAloud(messages)
   const context = useMemo(() => contextTokens(messages), [messages])
   const changes = useMemo(() => fileChanges(messages), [messages])
   const origin = session.mode === "headless" ? "Started from web" : linked ? "Linked, read-only" : `Terminal on ${session.hostname ?? "this Mac"}`
@@ -341,6 +344,20 @@ export function SessionView({
             <TabsTrigger value="terminal" disabled={!mirror} data-testid="terminal-tab">Terminal</TabsTrigger>
           </TabsList>
           <div className="flex min-w-0 gap-s2">
+            {readAloud.supported && (
+              <Toggle
+                size="sm"
+                variant="outline"
+                className="rounded-full"
+                pressed={readAloud.on}
+                onPressedChange={readAloud.toggle}
+                aria-label="Read replies aloud"
+                title={readAloud.on ? "Reading replies aloud" : "Read replies aloud"}
+                data-testid="read-aloud"
+              >
+                {readAloud.on ? <Volume2Icon /> : <VolumeXIcon />}
+              </Toggle>
+            )}
             {!ended && !linked && (
               <>
                 <Button

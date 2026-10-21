@@ -1,9 +1,10 @@
-import { ImageIcon, SendIcon, SquareIcon, XIcon } from "lucide-react"
+import { ImageIcon, MicIcon, MicOffIcon, SendIcon, SquareIcon, XIcon } from "lucide-react"
 import { useLayoutEffect, useRef, useState } from "react"
 import { Attachment, AttachmentAction, AttachmentActions, AttachmentGroup, AttachmentMedia } from "@/components/ui/attachment"
 import { Command, CommandItem, CommandList } from "@/components/ui/command"
 import { FieldError } from "@/components/ui/field"
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group"
+import { useDictation } from "@/hooks/useVoice"
 import { sendCommand } from "@/lib/commands"
 
 // Shown when the message starts with "/". Anything else typed is sent as is,
@@ -60,6 +61,7 @@ export function Composer({ sessionId, working, disabled, paused }: { sessionId: 
   const [imageError, setImageError] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const box = useRef<HTMLTextAreaElement>(null)
+  const dictation = useDictation(setText)
 
   // Grow with the text, up to a limit, then scroll.
   useLayoutEffect(() => {
@@ -88,6 +90,7 @@ export function Composer({ sessionId, working, disabled, paused }: { sessionId: 
   async function send(value = text) {
     const message = value.trim() || (images.length ? "Take a look at this." : "")
     if (!message || sending) return
+    dictation.stop()
     setSending(true)
     try {
       await sendCommand(sessionId, "prompt", {
@@ -138,6 +141,7 @@ export function Composer({ sessionId, working, disabled, paused }: { sessionId: 
         </AttachmentGroup>
       )}
       {imageError && <FieldError>{imageError}</FieldError>}
+      {dictation.error && <FieldError>{dictation.error}</FieldError>}
       <input
         ref={fileInput}
         type="file"
@@ -179,6 +183,21 @@ export function Composer({ sessionId, working, disabled, paused }: { sessionId: 
           <InputGroupButton size="icon-sm" className="rounded-full" disabled={disabled} onClick={() => fileInput.current?.click()} aria-label="Attach image" title="Attach image">
             <ImageIcon />
           </InputGroupButton>
+          {dictation.supported && (
+            <InputGroupButton
+              size="icon-sm"
+              variant={dictation.listening ? "default" : "ghost"}
+              className="rounded-full"
+              disabled={disabled}
+              onClick={() => (dictation.listening ? dictation.stop() : dictation.start(text))}
+              aria-label={dictation.listening ? "Stop listening" : "Talk"}
+              aria-pressed={dictation.listening}
+              title={dictation.listening ? "Stop listening" : "Talk instead of typing"}
+              data-testid="dictate"
+            >
+              {dictation.listening ? <MicOffIcon className="animate-pulse" /> : <MicIcon />}
+            </InputGroupButton>
+          )}
           {working && (
             <InputGroupButton
               variant="outline"

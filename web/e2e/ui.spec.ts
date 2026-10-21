@@ -717,3 +717,46 @@ test("Claude's questions show as a card, and answering types the right keys", as
   await db.from("events").insert({ session_id: "claude-1", csc_session: session.id, hook_event: "PostToolUse", payload: { tool_name: "AskUserQuestion", tool_use_id: "tu_q1" } })
   await expect(card).toHaveCount(0)
 })
+
+test("voice: talk into the message box, and have new replies read aloud", async ({ page }) => {
+  // Stand-ins for the browser's speech recognition and speech.
+  await page.addInitScript(() => {
+    class FakeRecognition {
+      onresult: ((e: unknown) => void) | null = null
+      onend: (() => void) | null = null
+      onerror: (() => void) | null = null
+      start() {
+        setTimeout(() => {
+          const result = Object.assign([{ transcript: "add a reset button" }], { isFinal: true })
+          this.onresult?.({ resultIndex: 0, results: [result] })
+        }, 50)
+      }
+      stop() {
+        this.onend?.()
+      }
+    }
+    const w = window as unknown as Record<string, unknown>
+    w.SpeechRecognition = FakeRecognition
+    w.webkitSpeechRecognition = FakeRecognition
+    w.spoken = []
+    Object.defineProperty(window, "speechSynthesis", {
+      value: { speak: (u: { text: string }) => (w.spoken as string[]).push(u.text), cancel: () => {} },
+    })
+    w.SpeechSynthesisUtterance = class {
+      constructor(public text: string) {}
+    }
+  })
+  await addMessages(session.id, [{ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "An old reply." }] } }])
+  await page.goto(`/#/s/${session.id}`)
+
+  await page.getByTestId("composer").fill("Please")
+  await page.getByTestId("dictate").click()
+  await expect(page.getByTestId("composer")).toHaveValue("Please add a reset button")
+  await page.getByTestId("dictate").click()
+
+  await page.getByTestId("read-aloud").click()
+  await addMessages(session.id, [
+    { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "**Done.** Open `index.html`:\n\n```html\n<button>reset</button>\n```" }] } },
+  ])
+  await expect.poll(() => page.evaluate(() => (window as unknown as { spoken: string[] }).spoken.filter(Boolean))).toEqual(["Done. Open index.html: (code)"])
+})
