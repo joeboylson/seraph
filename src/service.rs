@@ -40,8 +40,26 @@ fn macos() -> bool {
 
 // ---- start / stop -----------------------------------------------------------
 
+/// Left by `seraph stop`, so running sessions don't start the controller
+/// again behind your back. `seraph start` removes it.
+fn stopped_on_purpose() -> std::path::PathBuf {
+    config::home().join("stopped")
+}
+
+/// Start the controller in the background if it isn't running and wasn't
+/// stopped on purpose. Sessions call this now and then, so a controller that
+/// crashed comes back by itself. True if it started one.
+pub fn ensure_controller() -> bool {
+    if daemon_pid().is_some() || stopped_on_purpose().exists() || config::require().is_err() {
+        return false;
+    }
+    crate::supa::log("controller wasn't running; starting it");
+    detach(Command::new(config::exe()).arg("start").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())).spawn().is_ok()
+}
+
 pub fn cmd_start() -> Result<i32> {
     config::require()?;
+    let _ = fs::remove_file(stopped_on_purpose());
     if let Some(pid) = daemon_pid() {
         println!("Already running (pid {pid}). Page: {}", page_url());
         return Ok(0);
@@ -85,6 +103,7 @@ pub fn cmd_stop() -> Result<i32> {
         println!("The controller didn't stop; try again or kill it.");
         return Ok(1);
     }
+    let _ = fs::write(stopped_on_purpose(), "");
     println!("Stopped. Running Claude sessions keep going; they just can't be started from the page.");
     Ok(0)
 }

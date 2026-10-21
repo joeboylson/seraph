@@ -41,7 +41,17 @@ pub fn cmd_hook(args: &[String]) -> i32 {
     let mut raw = String::new();
     let _ = std::io::stdin().read_to_string(&mut raw);
     if args.iter().any(|a| a == "--send") {
-        if let Err(e) = send(&raw) {
+        // This copy runs in the background, so it can wait: a lost event
+        // leaves the page showing the wrong status or missing a question.
+        let mut result = send(&raw);
+        for wait in [2, 5, 15] {
+            if result.is_ok() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(wait));
+            result = send(&raw);
+        }
+        if let Err(e) = result {
             let _ = std::fs::create_dir_all(config::home());
             if let Ok(mut log) = OpenOptions::new().create(true).append(true).open(config::home().join("hooks.log")) {
                 let _ = writeln!(log, "{e}");

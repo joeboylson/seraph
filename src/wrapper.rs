@@ -508,6 +508,17 @@ fn run(w: Arc<Wrapper>) -> Result<i32> {
         let w = w.clone();
         thread::spawn(move || follow_transcript(&w.session_id, &w.done, false));
     }
+    {
+        // While this session runs, bring the computer's controller back if it
+        // dies (unless it was stopped on purpose), so the page keeps working.
+        let w = w.clone();
+        thread::spawn(move || {
+            while !w.done.load(Ordering::Relaxed) {
+                thread::sleep(Duration::from_secs(60));
+                crate::service::ensure_controller();
+            }
+        });
+    }
 
     let _raw = if w.headless {
         None
@@ -588,11 +599,8 @@ pub fn cmd_claude(args: &[String]) -> Result<i32> {
     let (mut headless, mut session_id, mut name) = (false, uuid::Uuid::new_v4().to_string(), None);
     // This computer's controller is what lets the page start, resume and
     // restart sessions here, so make sure it's running.
-    if !args.iter().any(|a| a == "--seraph-headless") && crate::service::daemon_pid().is_none() {
-        let started = crate::util::detach(std::process::Command::new(config::exe()).arg("start").stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())).spawn();
-        if started.is_ok() {
-            eprintln!("seraph: started this computer's controller, so the page can manage its sessions.");
-        }
+    if !args.iter().any(|a| a == "--seraph-headless") && crate::service::ensure_controller() {
+        eprintln!("seraph: started this computer's controller, so the page can manage its sessions.");
     }
     let (mut cols, mut rows) = (120u16, 40u16);
     let mut claude_args = Vec::new();

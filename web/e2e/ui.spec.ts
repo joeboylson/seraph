@@ -847,3 +847,23 @@ test("a device screen shows if it's active, and starts a session in a folder pic
     await db.from("controllers").delete().in("id", ["old-box", "off-box"])
   }
 })
+
+test("a request the page gives up on is cancelled, so it can't run later", async ({ page }) => {
+  test.setTimeout(90_000)
+  // Looks active, but nothing is there to answer.
+  await db.from("controllers").upsert({ id: "silent-box", hostname: "silent-box", home: "/home/silent", last_seen: new Date().toISOString() })
+  try {
+    await page.goto(`/#/s/${session.id}`)
+    await page.getByRole("navigation", { name: "Sessions" }).getByTestId("new-session").click()
+    await page.getByTestId("machine").click()
+    await page.getByRole("option", { name: "silent-box" }).click()
+    await page.getByTestId("cwd").fill("/home/silent/project")
+    await page.getByTestId("start-session").click()
+    await expect(page.getByRole("dialog").getByRole("alert")).toContainText("silent-box didn't answer", { timeout: 45_000 })
+    const { data } = await db.from("commands").select("status, error").eq("kind", "start_session").eq("target", "silent-box").single()
+    expect(data).toMatchObject({ status: "failed", error: expect.stringContaining("Cancelled") })
+  } finally {
+    await db.from("commands").delete().eq("target", "silent-box")
+    await db.from("controllers").delete().eq("id", "silent-box")
+  }
+})

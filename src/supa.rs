@@ -90,17 +90,26 @@ pub fn broadcast(messages: &[Value]) -> Result<()> {
     Ok(())
 }
 
+/// Record how a command went. Retried a few times: if this were lost, the
+/// page would wait on a command that already ran.
 pub fn finish_command(cmd_id: i64, result: Option<Value>, error: Option<String>) -> Result<()> {
-    update(
-        "commands",
-        &format!("id=eq.{cmd_id}"),
-        &json!({
-            "status": if error.is_some() { "failed" } else { "done" },
-            "result": result,
-            "error": error,
-            "done_at": now(),
-        }),
-    )
+    let patch = json!({
+        "status": if error.is_some() { "failed" } else { "done" },
+        "result": result,
+        "error": error,
+        "done_at": now(),
+    });
+    let mut wait = 1;
+    loop {
+        match update("commands", &format!("id=eq.{cmd_id}"), &patch) {
+            Ok(()) => return Ok(()),
+            Err(e) if wait > 8 => return Err(e),
+            Err(_) => {
+                std::thread::sleep(std::time::Duration::from_secs(wait));
+                wait *= 3;
+            }
+        }
+    }
 }
 
 /// Seconds within which the same message is written only once.

@@ -36,6 +36,9 @@ export async function askDaemon<T>(kind: string, payload: Record<string, unknown
     if (row?.status === "done") return row.result as T
     if (row?.status === "failed") throw new Error(row.error ?? "command failed")
   }
+  // Giving up: cancel it, so it can't run later out of the blue. If the
+  // computer picked it up just now, it finishes (and that's shown next time).
+  await db.from("commands").update({ status: "failed", error: "Cancelled: no answer in time." }).eq("id", data.id).eq("status", "pending")
   throw new Error(`${target} didn't answer. Run \`seraph start\` (or \`seraph doctor\`) on it.`)
 }
 

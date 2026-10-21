@@ -515,7 +515,15 @@ pub fn cmd_daemon() -> Result<i32> {
     let (mut last_beat, mut last_purge, mut last_watch) = (None, None, None);
     let (mut last_ship, mut last_prune, mut last_dead_check) = (None, None, None);
     let mut watcher = push::Watcher::default();
+    let mut last_turn = Instant::now();
     while !stop.load(Ordering::Relaxed) {
+        // A turn takes about a second; a long gap means the computer slept.
+        // Check in now, rather than up to 10 minutes after waking.
+        if last_turn.elapsed().as_secs() > 60 {
+            log(format!("daemon: woke up after {} s", last_turn.elapsed().as_secs()));
+            last_beat = None;
+        }
+        last_turn = Instant::now();
         if every(&mut last_watch, 3) {
             if let Err(e) = watcher.check(&controller_id) {
                 log(format!("daemon push: {e}"));
