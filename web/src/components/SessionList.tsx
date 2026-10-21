@@ -23,6 +23,16 @@ export function sessionTitle(s: Session) {
   return s.name || s.cwd.split("/").filter(Boolean).pop() || s.cwd
 }
 
+/** When it started, to tell apart sessions that would otherwise look the same. */
+const startedAt = (s: Session) => new Date(s.created_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+
+/** Titles that clash among `sessions` (e.g. two unnamed ones in one folder). */
+export function clashingTitles(sessions: Session[]) {
+  const seen = new Map<string, number>()
+  for (const s of sessions) seen.set(sessionTitle(s), (seen.get(sessionTitle(s)) ?? 0) + 1)
+  return (s: Session) => ((seen.get(sessionTitle(s)) ?? 0) > 1 ? startedAt(s) : null)
+}
+
 const UNKNOWN = "Unknown computer"
 const deviceOf = (s: Session) => s.hostname ?? UNKNOWN
 
@@ -140,11 +150,15 @@ function DeviceSessions({
   const live = matching.filter((s) => s.status !== "ended" || s.paused_at)
   const allEnded = matching.filter((s) => s.status === "ended" && !s.paused_at)
   const ended = allEnded.slice(0, shown)
+  const clash = clashingTitles(sessions)
 
   const item = (s: Session) => (
     <SidebarMenuItem key={s.id}>
       <SidebarMenuButton onClick={() => onSelect(s.id)} isActive={s.id === selectedId} aria-current={s.id === selectedId} data-testid="session-item" className="justify-between">
-        <span className="truncate">{sessionTitle(s)}</span>
+        <span className="truncate">
+          {sessionTitle(s)}
+          {clash(s) && <span className="ml-s2 text-muted-foreground" data-testid="session-started">{clash(s)}</span>}
+        </span>
         {s.status === "ended" && !s.paused_at ? (
           <span className="label shrink-0 normal-case">{timeAgo(s.ended_at ?? s.updated_at)}</span>
         ) : (

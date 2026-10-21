@@ -760,3 +760,19 @@ test("voice: talk into the message box, and have new replies read aloud", async 
   ])
   await expect.poll(() => page.evaluate(() => (window as unknown as { spoken: string[] }).spoken.filter(Boolean))).toEqual(["Done. Open index.html: (code)"])
 })
+
+test("two unnamed sessions in one folder are told apart by when they started", async ({ page }) => {
+  const a = await fakeSession({ name: null, cwd: "/tmp/seraph-test/twins", created_at: new Date(Date.now() - 3600_000).toISOString() })
+  const b = await fakeSession({ name: null, cwd: "/tmp/seraph-test/twins" })
+  try {
+    await page.goto(`/#/s/${b.id}`)
+    const items = page.getByRole("navigation", { name: "Sessions" }).getByTestId("session-item").filter({ hasText: "twins" })
+    await expect(items).toHaveCount(2)
+    const labels = await items.getByTestId("session-started").allTextContents()
+    expect(labels).toHaveLength(2)
+    expect(labels[0]).not.toBe(labels[1])
+  } finally {
+    await removeSession(a.id)
+    await removeSession(b.id)
+  }
+})

@@ -1,7 +1,7 @@
 import { XIcon } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { Session } from "@/lib/types"
-import { sessionTitle } from "./SessionList"
+import { clashingTitles, sessionTitle } from "./SessionList"
 import { StatusDot, shownStatus } from "./StatusBadge"
 
 /** Pinned sessions as tabs at the top, for switching between your main ones. */
@@ -20,6 +20,7 @@ export function PinnedTabs({
 }) {
   const pinned = pins.flatMap((id) => sessions.filter((s) => s.id === id))
   if (!pinned.length) return null
+  const clash = clashingTitles(pinned)
   return (
     // Scrolls sideways when the tabs don't fit, e.g. on a phone.
     <Tabs value={selectedId ?? ""} onValueChange={onSelect} className="min-w-0 overflow-x-auto [scrollbar-width:none]">
@@ -27,7 +28,10 @@ export function PinnedTabs({
         {pinned.map((s) => (
           <TabsTrigger key={s.id} value={s.id} className="group/tab max-w-[144px] gap-s2 pr-s2" data-testid="pinned-tab">
             <StatusDot status={shownStatus(s)} />
-            <span className="truncate">{sessionTitle(s)}</span>
+            <span className="truncate">
+              {sessionTitle(s)}
+              {clash(s) && <span className="ml-s1 text-muted-foreground">{clash(s)}</span>}
+            </span>
             <span
               role="button"
               tabIndex={-1}
