@@ -3,6 +3,7 @@
 mod config;
 mod daemon;
 mod embedded;
+mod folders;
 mod hook;
 mod link;
 mod logship;
@@ -43,6 +44,7 @@ Look after it
   seraph stop | restart       stop or restart the controller
   seraph logs [-f]            controller logs
   seraph service install      start the controller when you log in (uninstall to undo)
+  seraph folders [add|remove] which folders the page may browse and start sessions in
   seraph tailscale            let other devices install from this one
   seraph user list | remove   who can sign in to the page
   seraph user code <email>    print a sign-in code, instead of emailing one
@@ -354,6 +356,7 @@ fn dispatch(argv: &[String]) -> Result<i32> {
             args.positionals()?;
             cmd_tailscale(web_port, off)
         }
+        "folders" => folders::cmd_folders(&args.positionals()?),
         "user" => match args.positionals()?.as_slice() {
             [action] => users::cmd_user(action, None),
             [action, email] => users::cmd_user(action, Some(email)),

@@ -11,6 +11,8 @@
 //!                           each computer sharing a project needs its own
 //!     push_contact          who push services can reach about seraph's pushes
 //!                           (mailto: or https:), default the first member's email
+//!     folders               the folders seraph may browse and start sessions in
+//!                           (`seraph folders`); your home folder if none
 //!
 //! Each can be overridden with SERAPH_<NAME> in the environment, e.g.
 //! SERAPH_SUPABASE_URL. SERAPH_HOME moves the whole ~/.seraph folder.
@@ -21,7 +23,8 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-const KEYS: [&str; 8] = [
+const KEYS: [&str; 9] = [
+    "folders",
     "supabase_url",
     "supabase_key",
     "supabase_secret_key",
@@ -116,6 +119,11 @@ fn saved() -> Map<String, Value> {
         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
         .and_then(|v| v.as_object().cloned())
         .unwrap_or_default()
+}
+
+/// One saved setting as stored, for ones that aren't plain text (e.g. `folders`).
+pub fn saved_value(key: &str) -> Option<Value> {
+    saved().get(key).cloned()
 }
 
 /// The saved settings with environment overrides applied.

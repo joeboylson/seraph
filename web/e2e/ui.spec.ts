@@ -1,5 +1,9 @@
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { expect, test } from "@playwright/test"
 import { addMessages, db, expectCommand, fakeSession, removeSession, sendScreen } from "./helpers"
+import { TEST_HOME } from "./settings"
 
 let session: { id: string; name: string }
 
@@ -167,15 +171,46 @@ test("an ended session can't be messaged and offers Resume", async ({ page }) =>
   await expect(page.getByTestId("terminal-tab")).toBeDisabled()
 })
 
-test("the new-session dialog browses folders on the Mac", async ({ page }) => {
+test("the new-session dialog shows the computer's folders as a tree, and picks one", async ({ page }) => {
   await page.goto(`/#/s/${session.id}`)
   await expect(page.getByTestId("controller-status")).toHaveAttribute("data-online", "true")
   await page.getByTestId("new-session").click()
-  const path = page.getByTestId("cwd")
-  await path.fill("/tmp")
-  await path.press("Enter")
-  await expect(path).toHaveValue(/\/(private\/)?tmp$/)
-  await expect(page.getByTestId("folders")).toBeVisible()
+  await expect(page.getByTestId("machine")).toBeVisible()
+  const tree = page.getByTestId("folders")
+  // With no folders set, the top of the tree is the home folder.
+  await expect(tree.getByTestId("folder").first()).toHaveText("~")
+  await tree.getByTestId("folder-toggle").first().click()
+  const child = tree.getByTestId("folder").nth(1)
+  await expect(child).toBeVisible()
+  const picked = await child.getAttribute("data-path")
+  await child.click()
+  await expect(page.getByTestId("cwd")).toHaveValue(picked!)
+  await expect(child).toHaveAttribute("aria-pressed", "true")
+})
+
+test("seraph only browses and starts sessions in the folders it's allowed", async ({ page }) => {
+  const config = path.join(TEST_HOME, "config.json")
+  const saved = fs.readFileSync(config, "utf8")
+  const allowed = fs.mkdtempSync(path.join(os.tmpdir(), "seraph-allowed-"))
+  fs.mkdirSync(path.join(allowed, "app"))
+  fs.writeFileSync(config, JSON.stringify({ ...JSON.parse(saved), folders: [allowed] }))
+  try {
+    await page.goto(`/#/s/${session.id}`)
+    await page.getByTestId("new-session").click()
+    const tree = page.getByTestId("folders")
+    await expect(tree.getByTestId("folder")).toHaveCount(1)
+    await expect(tree.getByTestId("folder").first()).toContainText(path.basename(allowed))
+    await tree.getByTestId("folder-toggle").first().click()
+    await expect(tree.getByTestId("folder").filter({ hasText: "app" })).toBeVisible()
+
+    // A folder outside it is refused by the computer itself.
+    await page.getByTestId("cwd").fill("/etc")
+    await page.getByTestId("start-session").click()
+    await expect(page.getByRole("dialog").getByRole("alert")).toContainText("seraph folders add")
+  } finally {
+    fs.writeFileSync(config, saved)
+    fs.rmSync(allowed, { recursive: true, force: true })
+  }
 })
 
 test("phone layout fits the screen and the session list slides in @mobile", async ({ page }) => {

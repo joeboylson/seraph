@@ -15,8 +15,38 @@ use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// The folders inside `dir`, by name, skipping hidden ones. Links are
+/// followed, like a person browsing would.
+fn subfolders(dir: &Path) -> Result<Vec<(String, PathBuf)>> {
+    let mut found: Vec<(String, PathBuf)> = fs::read_dir(dir)
+        .map_err(|e| anyhow!("{}: {}", e.kind(), dir.display()))?
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            (!name.starts_with('.') && e.path().is_dir()).then(|| (name, e.path()))
+        })
+        .collect();
+    found.sort_by_key(|(name, _)| name.to_lowercase());
+    Ok(found)
+}
+
+/// Whether a folder has any folders inside, so the page knows if it opens.
+fn has_subfolders(dir: &Path) -> bool {
+    fs::read_dir(dir).map(|rd| rd.flatten().any(|e| !e.file_name().to_string_lossy().starts_with('.') && e.path().is_dir())).unwrap_or(false)
+}
+
+/// For the page's folder tree, one level at a time and only inside the
+/// folders seraph may use (see folders.rs): folder names, never files.
+/// With no `path`, the allowed folders themselves: the tree's top level.
 fn list_dirs(path: Option<&str>) -> Result<Value> {
-    let asked = canonical_or_plain(&config::expand(path.unwrap_or("~")));
+    let Some(path) = path.filter(|p| !p.is_empty()) else {
+        let roots: Vec<Value> = crate::folders::roots()
+            .iter()
+            .map(|r| json!({ "path": r, "name": r.to_string_lossy().replacen(&config::user_home(), "~", 1), "children": has_subfolders(r) }))
+            .collect();
+        return Ok(json!({ "roots": roots }));
+    };
+    let asked = canonical_or_plain(&config::expand(path));
     // A folder from an old session may be gone: show the nearest one that's left.
     let mut path = asked.clone();
     while !path.is_dir() {
@@ -25,17 +55,12 @@ fn list_dirs(path: Option<&str>) -> Result<Value> {
             None => break,
         }
     }
-    let mut dirs: Vec<String> = fs::read_dir(&path)
-        .map_err(|e| anyhow!("{}: {}", e.kind(), path.display()))?
-        .flatten()
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().into_owned();
-            // Follow links, like a person browsing would.
-            (!name.starts_with('.') && e.path().is_dir()).then_some(name)
-        })
-        .collect();
-    dirs.sort_by_key(|d| d.to_lowercase());
-    let parent = path.parent().unwrap_or(&path).to_path_buf();
+    if !crate::folders::allowed(&path) {
+        return Err(crate::folders::not_allowed(&asked));
+    }
+    let dirs: Vec<Value> = subfolders(&path)?.iter().map(|(name, p)| json!({ "name": name, "children": has_subfolders(p) })).collect();
+    // Up stops at the top of the allowed folders.
+    let parent = path.parent().filter(|p| crate::folders::allowed(p)).unwrap_or(&path).to_path_buf();
     let mut result = json!({ "path": path, "parent": parent, "dirs": dirs });
     if asked != path {
         result["missing"] = json!(asked);
@@ -121,6 +146,17 @@ fn start_session(payload: &Value) -> Result<Value> {
     check_fields(payload)?;
     let cwd_raw = payload["cwd"].as_str().ok_or_else(|| anyhow!("missing cwd"))?;
     let expanded = config::expand(cwd_raw);
+    // Only in the folders seraph may use; a new folder's nearest existing parent counts.
+    let mut existing = canonical_or_plain(&expanded);
+    while !existing.exists() {
+        match existing.parent() {
+            Some(p) => existing = p.to_path_buf(),
+            None => break,
+        }
+    }
+    if !crate::folders::allowed(&fs::canonicalize(&existing).unwrap_or(existing)) {
+        return Err(crate::folders::not_allowed(&expanded));
+    }
     if payload["create"] == true {
         fs::create_dir_all(&expanded)?;
     }

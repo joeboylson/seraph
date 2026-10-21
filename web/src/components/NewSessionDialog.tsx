@@ -1,18 +1,16 @@
-import { ChevronUpIcon, FolderIcon, FolderPlusIcon } from "lucide-react"
+import { FolderIcon, FolderPlusIcon } from "lucide-react"
+import { FolderTree } from "./FolderTree"
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Field, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group"
+import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Input } from "@/components/ui/input"
-import { Item, ItemContent, ItemGroup, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { askDaemon } from "@/lib/commands"
 import type { Controller, Session } from "@/lib/types"
-
-type Listing = { path: string; parent: string; dirs: string[]; missing?: string; machine?: string }
 
 const MODELS = [
   ["default", "Default model"],
@@ -49,8 +47,6 @@ export function NewSessionDialog({
   const [chosen, setChosen] = useState<string | null>(null)
   const machine = machines.find((m) => m.id === chosen) ?? machines.find((m) => m.id === latest) ?? machines[0]
   const online = Boolean(machine)
-  const home = machine?.home
-  const [listing, setListing] = useState<Listing | null>(null)
   const [cwd, setCwd] = useState("")
   const [newFolder, setNewFolder] = useState("")
   const [name, setName] = useState("")
@@ -62,23 +58,12 @@ export function NewSessionDialog({
 
   const recent = [...new Set(sessions.filter((s) => s.hostname === machine?.id).map((s) => s.cwd))].slice(0, 6)
 
-  async function browse(path?: string, quietIfMissing = false) {
-    setError(null)
-    try {
-      const result = await askDaemon<Listing>("list_dirs", { path: path ?? home ?? "~" }, machine!.id)
-      // The latest session's folder may be gone; just open home instead.
-      if (result.missing && quietIfMissing) return browse(home ?? "~")
-      setListing({ ...result, machine: machine!.id })
-      setCwd(result.path)
-      if (result.missing) setError(`${result.missing} doesn't exist any more. Showing ${result.path} instead.`)
-    } catch (e) {
-      setError((e as Error).message)
-    }
-  }
-
-  // Browse again whenever the dialog opens on a different computer.
+  // Each time it opens on a computer, start from its latest session's folder.
   useEffect(() => {
-    if (open && machine && listing?.machine !== machine.id) browse(recent[0], true)
+    if (open && machine) {
+      setCwd(recent[0] ?? "")
+      setError(null)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, machine?.id])
 
@@ -128,10 +113,11 @@ export function NewSessionDialog({
         )}
 
         <div className="flex flex-col gap-s5">
-          {machines.length > 1 && (
+          {/* Any computer that's on: its folders, its sessions. */}
+          {machines.length > 0 && (
             <Field>
               <FieldLabel htmlFor="f-computer" className="label">Computer</FieldLabel>
-              <Select value={machine?.id} onValueChange={(id) => { setChosen(id); setListing(null) }}>
+              <Select value={machine?.id} onValueChange={setChosen}>
                 <SelectTrigger id="f-computer" className="w-full" data-testid="machine"><SelectValue /></SelectTrigger>
                 <SelectContent>{machines.map((m) => <SelectItem key={m.id} value={m.id}>{m.id}</SelectItem>)}</SelectContent>
               </Select>
@@ -142,7 +128,7 @@ export function NewSessionDialog({
               <FieldLegend variant="label" className="label">Recent</FieldLegend>
               <div className="flex flex-wrap gap-s3">
                 {recent.map((path) => (
-                  <Button key={path} variant="outline" size="sm" className="max-w-full rounded-full font-mono" onClick={() => browse(path)}>
+                  <Button key={path} variant="outline" size="sm" className="max-w-full rounded-full font-mono" onClick={() => setCwd(path)}>
                     <span className="truncate">{path.split("/").pop()}</span>
                   </Button>
                 ))}
@@ -154,41 +140,28 @@ export function NewSessionDialog({
             <FieldLegend variant="label" className="label">Folder</FieldLegend>
             <InputGroup>
               <InputGroupAddon>
-                <InputGroupButton size="icon-xs" disabled={!listing || listing.path === listing.parent} onClick={() => browse(listing?.parent)} aria-label="Up one folder">
-                  <ChevronUpIcon />
-                </InputGroupButton>
+                <FolderIcon />
               </InputGroupAddon>
               <InputGroupInput
                 value={cwd}
                 onChange={(e) => setCwd(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault()
-                    browse(cwd)
-                  }
-                }}
-                onBlur={() => listing && cwd !== listing.path && browse(cwd)}
+                placeholder="Pick one below, or type a path"
                 className="font-mono"
                 aria-label="Folder path"
                 data-testid="cwd"
               />
             </InputGroup>
-            {listing && (
-            <ItemGroup className="max-h-56 gap-0 overflow-y-auto rounded-lg border py-s2" data-testid="folders">
-              {listing.dirs.map((dir) => (
-                <Item key={dir} asChild size="xs" className="w-full rounded-none px-s4 hover:bg-accent">
-                  <button type="button" onClick={() => browse(`${listing.path}/${dir}`)}>
-                    <ItemMedia>
-                      <FolderIcon className="size-4 text-muted-foreground" />
-                    </ItemMedia>
-                    <ItemContent>
-                      <ItemTitle className="font-normal">{dir}</ItemTitle>
-                    </ItemContent>
-                  </button>
-                </Item>
-              ))}
-              {!listing.dirs.length && <p className="px-s4 py-s2 text-sm text-muted-foreground">No folders here</p>}
-            </ItemGroup>
+            {machine && (
+              <FolderTree
+                key={machine.id}
+                machine={machine.id}
+                selected={cwd}
+                onSelect={(path) => {
+                  setError(null)
+                  setCwd(path)
+                }}
+                onError={setError}
+              />
             )}
             <InputGroup>
               <InputGroupAddon>
@@ -196,6 +169,9 @@ export function NewSessionDialog({
               </InputGroupAddon>
               <InputGroupInput value={newFolder} onChange={(e) => setNewFolder(e.target.value)} placeholder="New folder inside this one (optional)" aria-label="New folder" data-testid="new-folder" />
             </InputGroup>
+            <FieldDescription>
+              Only folders this computer allows. Add more there with <code className="font-mono">seraph folders add &lt;folder&gt;</code>.
+            </FieldDescription>
           </FieldSet>
 
           <div className="grid gap-s4 sm:grid-cols-2">

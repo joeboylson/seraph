@@ -54,6 +54,7 @@ back), and if seraph isn't set up it runs plain `claude`. So it's safe to
 | --- | --- |
 | Start Claude so the page can see and drive it | `seraph claude` (any `claude` flags) |
 | Start a session from your phone | **New session** on the page |
+| Choose which folders the page may browse and start sessions in | `seraph folders add <folder>` (your home folder if none) |
 | See recent sessions | `seraph sessions` |
 | Pick one back up | `seraph resume`, or `seraph resume <part of its name or folder>` |
 | Show an already-running Claude on the page (read-only) | `!seraph link` inside it |
