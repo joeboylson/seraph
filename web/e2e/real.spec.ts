@@ -110,10 +110,11 @@ test("build a small app from the web page @real", async ({ page }) => {
   await page.getByTestId("end-session").click()
   await page.getByTestId("confirm").click()
   await expect.poll(() => sessionStatus(id), { timeout: 60_000 }).toBe("ended")
+  // A session started from the page carries on in place: same session, same link.
   await page.getByTestId("resume").click()
-  await expect.poll(sessionId, { timeout: 60_000 }).not.toBe(id)
-  const resumed = sessionId()
-  await expect.poll(() => sessionStatus(resumed), { timeout: 90_000 }).toBe("idle")
+  await expect.poll(() => sessionStatus(id), { timeout: 90_000 }).toBe("idle")
+  expect(sessionId()).toBe(id)
+  const resumed = id
   await page.getByTestId("composer").fill("In one word, what is the name of the HTML file you made?")
   await page.getByTestId("send").click()
   await expect(page.getByTestId("chat").getByText(/index\.html/i).last()).toBeVisible({ timeout: 120_000 })
