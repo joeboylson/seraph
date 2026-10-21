@@ -63,6 +63,13 @@ pub fn home() -> PathBuf {
     }
 }
 
+/// Whether this is the usual setup in ~/.seraph (SERAPH_HOME unset, or set to it).
+pub fn is_default_home() -> bool {
+    let default = expand("~/.seraph");
+    let here = home();
+    here == default || (fs::canonicalize(&here).ok().is_some_and(|h| fs::canonicalize(&default).ok() == Some(h)))
+}
+
 /// Before the rename, settings lived in ~/.csc. Move them over once, so
 /// nothing needs setting up again.
 pub fn move_old_home() {
