@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The folders as saved, before any default.
-fn saved() -> Vec<String> {
+pub fn saved() -> Vec<String> {
     match config::saved_value("folders") {
         Some(Value::Array(a)) => a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
         _ => Vec::new(),

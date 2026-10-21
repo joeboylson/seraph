@@ -1,4 +1,4 @@
-import { PauseIcon, PencilIcon, PinIcon, PinOffIcon, Volume2Icon, VolumeXIcon, PowerIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon } from "lucide-react"
+import { BellIcon, BellOffIcon, BellRingIcon, PauseIcon, PencilIcon, PinIcon, PinOffIcon, Volume2Icon, VolumeXIcon, PowerIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import {
@@ -14,7 +14,16 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Toggle } from "@/components/ui/toggle"
 import { useReadAloud } from "@/hooks/useVoice"
@@ -23,12 +32,12 @@ import { Badge } from "@/components/ui/badge"
 import { Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceDescription, TraceLine, TraceTitle } from "@/components/ui/trace"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useMessages, useSentPrompts, useSessionEvents } from "@/hooks/data"
-import { askDaemon, deleteSession, endPaused, pauseSession, renameSession, sendCommand, sendKeys } from "@/lib/commands"
+import { askDaemon, deleteSession, endPaused, pauseSession, renameSession, sendCommand, sendKeys, setNotify } from "@/lib/commands"
 import { readMode, readPrompt, type Prompt } from "@/lib/screen"
 import { dropMirror, getMirror } from "@/lib/terminal"
 import { pendingQuestions } from "@/lib/questions"
 import { contextTokens, fileChanges, latestTodos, shortPath, type Todo } from "@/lib/tools"
-import type { Session } from "@/lib/types"
+import type { Notify, Session } from "@/lib/types"
 import { ChangesView } from "./ChangesView"
 import { ChatView } from "./ChatView"
 import { Composer } from "./Composer"
@@ -111,6 +120,37 @@ function Confirm({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+}
+
+const NOTIFY: { value: Notify; label: string }[] = [
+  { value: "all", label: "Every time it finishes or needs you" },
+  { value: "needs-you", label: "When it needs you or finishes a long task" },
+  { value: "off", label: "Nothing" },
+]
+
+/** What this session pushes to phones about. */
+function NotifyMenu({ session }: { session: Session }) {
+  const value = session.notify ?? "needs-you"
+  const Icon = value === "all" ? BellRingIcon : value === "off" ? BellOffIcon : BellIcon
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="rounded-full" aria-label="Notifications" title="Notifications for this session" data-testid="notify-menu" data-notify={value}>
+          <Icon />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel className="label">Notify phones about</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={value} onValueChange={(v) => setNotify(session.id, v as Notify).catch(() => {})}>
+          {NOTIFY.map((n) => (
+            <DropdownMenuRadioItem key={n.value} value={n.value} data-testid={`notify-${n.value}`}>
+              {n.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -344,6 +384,7 @@ export function SessionView({
             <TabsTrigger value="terminal" disabled={!mirror} data-testid="terminal-tab">Terminal</TabsTrigger>
           </TabsList>
           <div className="flex min-w-0 gap-s2">
+            {!ended && !linked && <NotifyMenu session={session} />}
             {readAloud.supported && (
               <Toggle
                 size="sm"

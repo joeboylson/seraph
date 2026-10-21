@@ -15,6 +15,7 @@ mod supa;
 mod transcript;
 mod users;
 mod util;
+mod webpush;
 mod wrapper;
 
 use anyhow::{anyhow, bail, Result};
@@ -50,6 +51,7 @@ Look after it
   seraph user code <email>    print a sign-in code, instead of emailing one
   seraph db push              install or update the database tables
   seraph uninstall [--purge]  remove seraph from this machine
+  seraph update               install the latest release here (or from a device's screen)
   seraph --version            which build this is
 
 Update: ./install.sh in the repo, or rerun the install line on other devices.
@@ -357,6 +359,7 @@ fn dispatch(argv: &[String]) -> Result<i32> {
             cmd_tailscale(web_port, off)
         }
         "folders" => folders::cmd_folders(&args.positionals()?),
+        "update" => service::cmd_update(),
         "user" => match args.positionals()?.as_slice() {
             [action] => users::cmd_user(action, None),
             [action, email] => users::cmd_user(action, Some(email)),

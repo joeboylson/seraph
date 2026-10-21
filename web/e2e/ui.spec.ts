@@ -867,3 +867,69 @@ test("a request the page gives up on is cancelled, so it can't run later", async
     await db.from("controllers").delete().eq("id", "silent-box")
   }
 })
+
+test("the overview lists running sessions on every device, the ones that need you first", async ({ page }) => {
+  const busy = await fakeSession({ name: "busy one", status: "working", hostname: "box-1" })
+  const asking = await fakeSession({ name: "asking one", status: "waiting", hostname: "box-2" })
+  await addMessages(asking.id, [{ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "Should I **delete** the old tests?" }] } }])
+  try {
+    await page.goto("/")
+    const rows = page.getByTestId("overview-session")
+    await expect(rows.first()).toContainText("asking one")
+    await expect(rows.first()).toHaveAttribute("data-status", "waiting")
+    await expect(rows.first().getByTestId("overview-reply")).toHaveText("Should I delete the old tests?")
+    await expect(rows.filter({ hasText: "busy one" })).toContainText("box-1")
+    await expect(page.getByTestId("waiting-count")).toHaveText(/^[1-9]/)
+    await rows.first().click()
+    await expect(page.getByTestId("session-title")).toHaveText("asking one")
+    await page.getByTestId("overview-link").click()
+    await expect(page.getByTestId("overview")).toBeVisible()
+  } finally {
+    await removeSession(busy.id)
+    await removeSession(asking.id)
+  }
+})
+
+test("each session chooses what it notifies phones about", async ({ page }) => {
+  await page.goto(`/#/s/${session.id}`)
+  await expect(page.getByTestId("notify-menu")).toHaveAttribute("data-notify", "needs-you")
+  await page.getByTestId("notify-menu").click()
+  await page.getByTestId("notify-off").click()
+  await expect.poll(async () => (await db.from("sessions").select("notify").eq("id", session.id).single()).data?.notify).toBe("off")
+  await expect(page.getByTestId("notify-menu")).toHaveAttribute("data-notify", "off")
+})
+
+test("a device screen warns about its setup, offers an update, and shows its logs", async ({ page }) => {
+  await page.route("https://api.github.com/**", (route) => route.fulfill({ json: { tag_name: "v9.9.9" } }))
+  await db.from("controllers").upsert({
+    id: "stale-box",
+    hostname: "stale-box",
+    home: "/home/stale",
+    last_seen: new Date().toISOString(),
+    version: "0.2.0 (built 2026-10-19 17:46 UTC)",
+    info: { folders: [], at_login: false, platform: "linux-aarch64" },
+  })
+  await db.from("logs").insert([
+    { machine: "stale-box", source: "seraph.log", ts: new Date().toISOString(), pid: 1, line: "daemon: started, seraph 0.2.0" },
+    { machine: "stale-box", source: "seraph.log", ts: new Date().toISOString(), pid: 1, line: "transcript: Network Error: timed out" },
+  ])
+  try {
+    await page.goto(`/#/d/stale-box`)
+    await expect(page.getByTestId("warning-version")).toContainText("v9.9.9 is out")
+    await expect(page.getByTestId("warning-folders")).toContainText("seraph folders add")
+    await expect(page.getByTestId("warning-login")).toContainText("seraph service install")
+    const logs = page.getByTestId("device-logs")
+    await expect(logs.getByTestId("log-line")).toHaveCount(2)
+    await logs.getByTestId("logs-problems").click()
+    await expect(logs.getByTestId("log-line")).toHaveCount(1)
+    await expect(logs.getByTestId("log-line")).toContainText("timed out")
+
+    await page.getByTestId("device-update").click()
+    // (Besides the folder listing the screen asked for.)
+    await expect.poll(async () => (await db.from("commands").select("kind").eq("target", "stale-box")).data?.map((c) => c.kind)).toContain("update")
+  } finally {
+    await db.from("commands").delete().eq("target", "stale-box")
+    await db.from("logs").delete().eq("machine", "stale-box")
+    await db.from("controllers").delete().eq("id", "stale-box")
+  }
+})

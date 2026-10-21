@@ -5,8 +5,9 @@ self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim(
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close()
+  // A session's notice opens it; anything else opens the "Needs you" overview.
   const id = event.notification.data?.sessionId
-  const url = new URL(id ? `/#/s/${id}` : "/", self.location.origin).href
+  const url = new URL(id ? `/#/s/${id}` : "/#/overview", self.location.origin).href
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
       const open = windows.find((w) => new URL(w.url).origin === self.location.origin)
@@ -16,15 +17,23 @@ self.addEventListener("notificationclick", (event) => {
   )
 })
 
-// The controller's pushes are empty on purpose (nothing about a session goes
-// through the push service), so the notice is generic and opens the page.
+// The controller encrypts what a notice says for this device (the browser
+// decrypts it before it gets here), so the push service can't read it.
+// Pushes to devices subscribed before that are empty: a generic notice.
 self.addEventListener("push", (event) => {
+  let notice = null
+  try {
+    notice = event.data ? event.data.json() : null
+  } catch {
+    notice = null
+  }
   event.waitUntil(
-    self.registration.showNotification("Seraph", {
-      body: "A session needs you or has finished.",
+    self.registration.showNotification(notice?.title ?? "Seraph", {
+      body: notice?.body ?? "A session needs you or has finished.",
       icon: "/icon-192.png",
-      tag: "seraph",
+      tag: notice?.tag ?? "seraph",
       renotify: true,
+      data: { sessionId: notice?.sessionId ?? null },
     }),
   )
 })

@@ -1,4 +1,4 @@
-import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from "lucide-react"
+import { BellRingIcon, ChevronLeftIcon, ChevronRightIcon, PlusIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -48,6 +48,9 @@ export function SessionList({
   openDevice,
   onSelect,
   onOpenDevice,
+  onOpenOverview,
+  overviewOpen,
+  waiting,
   onNew,
 }: {
   sessions: Session[]
@@ -58,6 +61,11 @@ export function SessionList({
   openDevice: string | null
   onSelect: (id: string) => void
   onOpenDevice: (id: string) => void
+  onOpenOverview: () => void
+  /** Whether the overview is what's open. */
+  overviewOpen: boolean
+  /** How many sessions are waiting on you, across every device. */
+  waiting: number
   onNew: () => void
 }) {
   const { setOpenMobile } = useSidebar()
@@ -91,6 +99,22 @@ export function SessionList({
           >
             <PlusIcon /> New session
           </Button>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={overviewOpen}
+                onClick={() => {
+                  onOpenOverview()
+                  setOpenMobile(false)
+                }}
+                data-testid="overview-link"
+              >
+                <BellRingIcon className={cn(waiting && "text-highlight")} />
+                <span>Needs you</span>
+                {waiting > 0 && <span className="ml-auto rounded-full bg-highlight px-s2 font-mono text-xs text-on-highlight" data-testid="waiting-count">{waiting}</span>}
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
         </SidebarHeader>
         <SidebarContent>
           {device === null ? (

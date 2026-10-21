@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { db } from "@/lib/supabase"
-import type { Command, Controller, HookEvent, MessageRow, Session } from "@/lib/types"
+import type { Command, Controller, HookEvent, LogLine, MessageRow, Session } from "@/lib/types"
 import { useRealtimeTable } from "./useRealtimeTable"
 
 export function useSessions() {
@@ -88,4 +88,93 @@ export function useSentPrompts(sessionId: string) {
     limit: 200,
   })
   return useMemo(() => rows.filter((c) => c.kind === "prompt").sort((a, b) => a.id - b.id).slice(-50), [rows])
+}
+
+/** Each session's newest reply from Claude, for the overview. Rechecked every 10 seconds. */
+export function useLastReplies(sessionIds: string[]) {
+  const key = sessionIds.slice().sort().join(",")
+  const [replies, setReplies] = useState<Record<string, MessageRow>>({})
+  useEffect(() => {
+    if (!key) return setReplies({})
+    let gone = false
+    const load = async () => {
+      const { data } = await db
+        .from("messages")
+        .select("*")
+        .in("session_id", key.split(","))
+        .eq("type", "assistant")
+        .order("id", { ascending: false })
+        .limit(400)
+      if (gone || !data) return
+      const latest: Record<string, MessageRow> = {}
+      for (const m of data as MessageRow[]) {
+        const content = m.data.message?.content
+        const hasText = Array.isArray(content) && content.some((b) => b.type === "text" && b.text.trim())
+        if (hasText && !latest[m.session_id]) latest[m.session_id] = m
+      }
+      setReplies(latest)
+    }
+    load()
+    const t = setInterval(load, 10_000)
+    return () => {
+      gone = true
+      clearInterval(t)
+    }
+  }, [key])
+  return replies
+}
+
+/** "0.2.5 (built …)" or "v0.2.5" to [0, 2, 5]. */
+export function versionParts(v: string | null | undefined) {
+  return (v ?? "").replace(/^v/, "").split(" ")[0].split(".").map((n) => Number(n) || 0)
+}
+
+/** Whether version `a` is older than `b`. */
+export function olderThan(a: string | null | undefined, b: string | null | undefined) {
+  const [x, y] = [versionParts(a), versionParts(b)]
+  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0)
+  return false
+}
+
+const RELEASE_KEY = "seraph:latest-release"
+
+/** The newest published seraph release ("v0.2.6"), from GitHub, checked at most every 10 minutes. */
+export function useLatestRelease() {
+  const [tag, setTag] = useState<string | null>(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(RELEASE_KEY) ?? "null")
+      return saved && Date.now() - saved.at < 600_000 ? saved.tag : null
+    } catch {
+      return null
+    }
+  })
+  useEffect(() => {
+    if (tag) return
+    fetch("https://api.github.com/repos/joeboylson/seraph/releases/latest")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => {
+        if (!r?.tag_name) return
+        setTag(r.tag_name)
+        try {
+          sessionStorage.setItem(RELEASE_KEY, JSON.stringify({ tag: r.tag_name, at: Date.now() }))
+        } catch {
+          // only for this view then
+        }
+      })
+      .catch(() => {})
+  }, [tag])
+  return tag
+}
+
+/** A computer's newest log lines (see logship.rs), newest first. */
+export function useDeviceLogs(machine: string) {
+  const [lines, setLines] = useState<LogLine[] | null>(null)
+  const load = useCallback(async () => {
+    const { data } = await db.from("logs").select("*").eq("machine", machine).order("id", { ascending: false }).limit(150)
+    setLines((data as LogLine[] | null) ?? [])
+  }, [machine])
+  useEffect(() => {
+    load()
+  }, [load])
+  return { lines, reload: load }
 }

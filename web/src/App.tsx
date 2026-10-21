@@ -3,12 +3,13 @@ import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { NewSessionDialog } from "@/components/NewSessionDialog"
 import { DeviceView } from "@/components/DeviceView"
+import { Overview } from "@/components/Overview"
 import { PinnedTabs } from "@/components/PinnedTabs"
 import { SessionList } from "@/components/SessionList"
 import { SessionView } from "@/components/SessionView"
@@ -19,7 +20,8 @@ import { onCommandError } from "@/lib/commands"
 import { signOut } from "@/lib/push"
 
 // What's open lives in the URL hash so links and reloads keep it:
-// #/s/<session id> for a session, #/d/<computer> for a device.
+// #/s/<session id> for a session, #/d/<computer> for a device, and the
+// "Needs you" overview otherwise (#/overview).
 function useHashRoute() {
   const read = () => {
     const session = location.hash.match(/^#\/s\/([\w-]+)/)?.[1] ?? null
@@ -36,6 +38,7 @@ function useHashRoute() {
     route,
     select: (id: string) => (location.hash = `/s/${id}`),
     openDevice: (id: string) => (location.hash = `/d/${encodeURIComponent(id)}`),
+    openOverview: () => (location.hash = "/overview"),
   }
 }
 
@@ -44,7 +47,7 @@ export default function App() {
   const devices = useDevices()
   const machines = useMemo(() => devices.filter((d) => d.active), [devices])
   const connected = useConnected()
-  const { route, select, openDevice } = useHashRoute()
+  const { route, select, openDevice, openOverview } = useHashRoute()
   const selectedId = route.session
   const [newOpen, setNewOpen] = useState(false)
   // Set when New session comes from a device's folder.
@@ -68,13 +71,7 @@ export default function App() {
   }, [selectedId, selected, loading, reload])
   const notifications = useNotifications(sessions, select)
 
-  // With nothing chosen, open the most recent running session.
-  useEffect(() => {
-    if (!selectedId && !route.device && sessions.length) {
-      const first = sessions.find((s) => s.status !== "ended") ?? sessions[0]
-      select(first.id)
-    }
-  }, [selectedId, route.device, sessions, select])
+  const waiting = sessions.filter((s) => s.status === "waiting" && !s.paused_at).length
   const device = route.device ? devices.find((d) => d.id === route.device) : undefined
 
   return (
@@ -87,6 +84,9 @@ export default function App() {
         openDevice={route.device}
         onSelect={select}
         onOpenDevice={openDevice}
+        onOpenOverview={openOverview}
+        overviewOpen={!selectedId && !route.device}
+        waiting={waiting}
         onNew={() => {
           setPreset(null)
           setNewOpen(true)
@@ -149,13 +149,13 @@ export default function App() {
               key={selected.id}
               session={selected}
               onOpen={select}
-              onDeleted={() => (location.hash = "")}
+              onDeleted={() => openOverview()}
               pinned={pins.includes(selected.id)}
               canPin={pins.length < MAX_PINS}
               onTogglePin={() => togglePin(selected.id)}
               hostOnline={!!selected.hostname && machines.some((m) => m.id === selected.hostname)}
             />
-          ) : loading || selectedId ? (
+          ) : selectedId || loading ? (
             <Empty>
               <EmptyHeader>
                 <Spinner />
@@ -163,17 +163,7 @@ export default function App() {
               </EmptyHeader>
             </Empty>
           ) : (
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle className="text-title">No sessions yet</EmptyTitle>
-                <EmptyDescription>
-                  Start one here, or run <code className="font-mono">seraph claude</code> in a terminal on your Mac.
-                </EmptyDescription>
-              </EmptyHeader>
-              <EmptyContent>
-                <Button className="rounded-full" onClick={() => setNewOpen(true)}>New session</Button>
-              </EmptyContent>
-            </Empty>
+            <Overview sessions={sessions} onOpen={select} />
           )}
         </div>
       </SidebarInset>

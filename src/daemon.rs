@@ -184,6 +184,15 @@ fn start_session(payload: &Value) -> Result<Value> {
     Ok(json!({ "session_id": session_id, "cwd": cwd }))
 }
 
+/// Update seraph on this computer, asked from the page: runs `seraph update`
+/// in the background, which ends by restarting this controller. Sessions keep
+/// running.
+fn update_seraph() -> Result<Value> {
+    let log_file = OpenOptions::new().create(true).append(true).open(config::daemon_log_path())?;
+    detach(Command::new(config::exe()).arg("update").stdin(Stdio::null()).stdout(log_file.try_clone()?).stderr(log_file)).spawn()?;
+    Ok(json!({ "updating": true, "from": crate::VERSION }))
+}
+
 /// Restart a session started from the page: end its Claude, wait for it to
 /// exit, then start Claude again in the same session, resuming the same
 /// conversation. The session keeps its id, so the page stays on it.
@@ -268,6 +277,7 @@ fn handle(cmd: &Value) -> Result<Value> {
         "list_dirs" => list_dirs(payload["path"].as_str()),
         "start_session" => start_session(payload),
         "restart_session" => restart_session(payload),
+        "update" => update_seraph(),
         other => bail!("unknown command: {other}"),
     }
 }
@@ -378,7 +388,20 @@ fn heartbeat(controller_id: &str) -> Result<()> {
     api(
         "POST",
         "/rest/v1/controllers?on_conflict=id",
-        Some(&json!({ "id": controller_id, "hostname": controller_id, "home": config::user_home(), "last_seen": now(), "stopped_at": null, "version": crate::VERSION })),
+        Some(&json!({
+            "id": controller_id,
+            "hostname": controller_id,
+            "home": config::user_home(),
+            "last_seen": now(),
+            "stopped_at": null,
+            "version": crate::VERSION,
+            // For the device screen's warnings.
+            "info": {
+                "folders": crate::folders::saved(),
+                "at_login": crate::service::service_installed(),
+                "platform": format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+            },
+        })),
         Some("resolution=merge-duplicates,return=minimal"),
     )?;
     Ok(())
@@ -536,7 +559,7 @@ pub fn cmd_daemon() -> Result<i32> {
             run_steps(&controller_id, &[("ship_logs", crate::logship::ship)]);
         }
         if every(&mut last_prune, 3600) {
-            run_steps(&controller_id, &[("prune_logs", crate::logship::prune)]);
+            run_steps(&controller_id, &[("prune_logs", crate::logship::prune), ("prune_alerts", push::prune_alerts)]);
         }
         if every(&mut last_beat, HEARTBEAT_SECS) {
             run_steps(&controller_id, &[("heartbeat", heartbeat)]);

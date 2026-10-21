@@ -27,7 +27,11 @@ export type Session = {
   usage: SessionUsage | null
   /** Set while the session is paused: Claude stopped, waiting to be resumed. */
   paused_at: string | null
+  /** What it pushes about: everything, when it needs you or finishes a long task, or nothing. */
+  notify?: Notify
 }
+
+export type Notify = "all" | "needs-you" | "off"
 
 export type HookEvent = {
   id: number
@@ -97,4 +101,8 @@ export type Controller = {
   /** Set when it stopped cleanly; empty while it runs. */
   stopped_at?: string | null
   version?: string | null
+  /** What it reports about its computer on each check-in. */
+  info?: { folders?: string[]; at_login?: boolean; platform?: string } | null
 }
+
+export type LogLine = { id: number; machine: string; source: string; ts: string | null; pid: number | null; line: string }

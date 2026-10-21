@@ -108,6 +108,22 @@ pub fn cmd_stop() -> Result<i32> {
     Ok(0)
 }
 
+/// Where releases and the install line live.
+pub const INSTALL_LINE: &str = "curl -fsSL https://raw.githubusercontent.com/joeboylson/seraph/main/install.sh | sh";
+
+/// `seraph update`: the install line, which downloads the latest release for
+/// this computer, checks it, swaps it in and restarts the controller.
+/// SERAPH_VERSION=v0.2.0 picks a release.
+pub fn cmd_update() -> Result<i32> {
+    log_update("updating");
+    let status = Command::new("sh").args(["-c", INSTALL_LINE]).status()?;
+    Ok(status.code().unwrap_or(1))
+}
+
+fn log_update(what: &str) {
+    crate::supa::log(format!("update: {what} from seraph {}", crate::VERSION));
+}
+
 pub fn cmd_restart() -> Result<i32> {
     cmd_stop()?;
     cmd_start()

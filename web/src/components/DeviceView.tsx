@@ -1,11 +1,14 @@
-import { PlusIcon } from "lucide-react"
+import { DownloadIcon, PlusIcon, RefreshCwIcon, TriangleAlertIcon } from "lucide-react"
 import { useState } from "react"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { toast } from "sonner"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { FieldDescription } from "@/components/ui/field"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item"
-import type { Device } from "@/hooks/data"
+import { Toggle } from "@/components/ui/toggle"
+import { olderThan, useDeviceLogs, useLatestRelease, type Device } from "@/hooks/data"
+import { askDaemon } from "@/lib/commands"
 import type { Session } from "@/lib/types"
 import { timeAgo } from "@/lib/utils"
 import { FolderTree } from "./FolderTree"
@@ -29,6 +32,43 @@ export function DeviceView({
 }) {
   const [folder, setFolder] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const [updating, setUpdating] = useState(false)
+  const latest = useLatestRelease()
+  const behind = Boolean(latest && device.version && olderThan(device.version, latest))
+
+  // Things to fix about this computer's setup.
+  const warnings: { id: string; text: React.ReactNode }[] = []
+  if (behind) warnings.push({ id: "version", text: <>It runs seraph {device.version?.split(" ")[0]}; {latest} is out.</> })
+  if (device.info && !device.info.folders?.length)
+    warnings.push({
+      id: "folders",
+      text: (
+        <>
+          No allowed folders set, so the page can browse its whole home folder. On it, narrow that with <code className="font-mono">seraph folders add &lt;folder&gt;</code>.
+        </>
+      ),
+    })
+  if (device.info && device.info.at_login === false)
+    warnings.push({
+      id: "login",
+      text: (
+        <>
+          Its controller won't start again after a restart. On it, run <code className="font-mono">seraph service install</code>.
+        </>
+      ),
+    })
+
+  async function update() {
+    setUpdating(true)
+    try {
+      await askDaemon("update", {}, device.id)
+      toast.success(`${device.id} is updating. Its controller restarts in a minute; sessions keep running.`)
+    } catch (e) {
+      toast.error(`Couldn't update ${device.id}: ${(e as Error).message}`)
+    } finally {
+      setUpdating(false)
+    }
+  }
   const mine = sessions.filter((s) => s.hostname === device.id)
   const running = mine.filter((s) => s.status !== "ended" || s.paused_at)
 
@@ -48,6 +88,32 @@ export function DeviceView({
           {` · ${running.length} running`}
         </p>
       </header>
+
+      {warnings.length > 0 && (
+        <Alert data-testid="device-warnings">
+          <TriangleAlertIcon />
+          <AlertTitle>Worth fixing</AlertTitle>
+          <AlertDescription>
+            <ul className="flex list-disc flex-col gap-s1 pl-s4">
+              {warnings.map((w) => (
+                <li key={w.id} data-testid={`warning-${w.id}`}>
+                  {w.text}
+                </li>
+              ))}
+            </ul>
+            {behind &&
+              (device.active ? (
+                <Button size="sm" className="mt-s3 rounded-full" onClick={update} disabled={updating} data-testid="device-update">
+                  <DownloadIcon /> {updating ? "Asking…" : `Update to ${latest}`}
+                </Button>
+              ) : (
+                <p className="pt-s2">
+                  It's inactive, so update it there: <code className="font-mono">seraph update</code>
+                </p>
+              ))}
+          </AlertDescription>
+        </Alert>
+      )}
 
       {device.active ? (
         <section className="flex flex-col gap-s3">
@@ -76,6 +142,8 @@ export function DeviceView({
         </Alert>
       )}
 
+      <DeviceLogs machine={device.id} />
+
       {mine.length > 0 && (
         <section className="flex flex-col gap-s3">
           <p className="label">Sessions</p>
@@ -97,5 +165,41 @@ export function DeviceView({
         </section>
       )}
     </div>
+  )
+}
+
+// Lines that say something went wrong.
+const PROBLEM = /error|fail|panic|timed out|refused|unreachable|expired|http \d{3}/i
+
+/** The computer's newest log lines, as its controller uploaded them. */
+function DeviceLogs({ machine }: { machine: string }) {
+  const { lines, reload } = useDeviceLogs(machine)
+  const [problemsOnly, setProblemsOnly] = useState(false)
+  const shown = (lines ?? []).filter((l) => !problemsOnly || PROBLEM.test(l.line))
+  return (
+    <section className="flex flex-col gap-s3" data-testid="device-logs">
+      <div className="flex items-center gap-s3">
+        <p className="label">Recent activity</p>
+        <Toggle size="sm" variant="outline" className="rounded-full" pressed={problemsOnly} onPressedChange={setProblemsOnly} data-testid="logs-problems">
+          Problems only
+        </Toggle>
+        <Button variant="ghost" size="icon-sm" className="rounded-full" onClick={reload} aria-label="Refresh" title="Refresh">
+          <RefreshCwIcon />
+        </Button>
+      </div>
+      <div className="max-h-72 overflow-y-auto rounded-lg border p-s3 font-mono text-xs">
+        {lines === null ? (
+          <p className="text-muted-foreground">Loading…</p>
+        ) : shown.length ? (
+          shown.map((l) => (
+            <p key={l.id} className={PROBLEM.test(l.line) ? "text-destructive" : undefined} data-testid="log-line">
+              <span className="text-muted-foreground">{l.ts ? new Date(l.ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }) : l.source}</span> {l.line}
+            </p>
+          ))
+        ) : (
+          <p className="text-muted-foreground">{problemsOnly ? "No problems logged." : "Nothing logged yet. Logs arrive about once a minute."}</p>
+        )}
+      </div>
+    </section>
   )
 }

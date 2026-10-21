@@ -1,8 +1,10 @@
-//! Web Push to members' phones when a session needs them or finishes.
+//! Web Push to members' phones when a session needs them or finishes a long
+//! task, and when a plan limit runs high.
 //!
-//! The pushes are empty: the phone shows a generic notice and opens the page,
-//! so nothing about a session passes through Google's, Apple's or Mozilla's
-//! push service. Empty pushes need no encryption, only a VAPID signature (ES256).
+//! What a notification says is encrypted for each phone (webpush.rs), so
+//! Google's, Apple's or Mozilla's push service only ever carries ciphertext.
+//! Phones that subscribed before keys were kept get an empty push and a
+//! generic notice. Each push is signed with a VAPID key (ES256).
 
 use crate::config;
 use crate::supa::{api, log, quote, select_rows};
@@ -12,7 +14,7 @@ use base64::Engine;
 use p256::ecdsa::{signature::Signer, Signature, SigningKey};
 use p256::pkcs8::LineEnding;
 use p256::SecretKey;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
@@ -23,8 +25,6 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 // Endpoints are written by the page, so only ever contact real push services.
 const PUSH_HOSTS: [&str; 4] = ["fcm.googleapis.com", ".push.services.mozilla.com", ".push.apple.com", ".notify.windows.com"];
 
-// A session's status changes that are worth a buzz.
-const NOTEWORTHY: [(&str, &str); 4] = [("working", "waiting"), ("idle", "waiting"), ("starting", "waiting"), ("working", "idle")];
 
 pub fn key_path() -> PathBuf {
     config::home().join("vapid.pem")
@@ -120,16 +120,20 @@ pub fn allowed(endpoint: &str) -> bool {
     url.scheme() == "https" && PUSH_HOSTS.iter().any(|h| host == h.trim_start_matches('.') || host.ends_with(h))
 }
 
-/// Send one empty push. Returns the HTTP status (0 if it couldn't connect).
-pub fn send(endpoint: &str, key: &SigningKey, public: &str, contact: &str) -> u16 {
+/// Send one push: empty, or `body` already encrypted for that phone.
+/// Returns the HTTP status (0 if it couldn't connect).
+pub fn send(endpoint: &str, key: &SigningKey, public: &str, contact: &str, body: Option<&[u8]>) -> u16 {
     let Ok(url) = url::Url::parse(endpoint) else { return 0 };
     let audience = format!("{}://{}", url.scheme(), url.host_str().unwrap_or("")) + &url.port().map(|p| format!(":{p}")).unwrap_or_default();
-    let res = crate::supa::agent(15)
+    let mut req = crate::supa::agent(15)
         .post(endpoint)
         .set("Authorization", &format!("vapid t={}, k={public}", vapid_jwt(key, &audience, contact)))
         .set("TTL", "3600")
-        .set("Urgency", "high")
-        .send_bytes(&[]);
+        .set("Urgency", "high");
+    if body.is_some() {
+        req = req.set("Content-Encoding", "aes128gcm").set("Content-Type", "application/octet-stream");
+    }
+    let res = req.send_bytes(body.unwrap_or(&[]));
     match res {
         Ok(r) => r.status(),
         Err(ureq::Error::Status(code, _)) => code,
@@ -141,26 +145,50 @@ fn host_of(endpoint: &str) -> String {
     url::Url::parse(endpoint).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default()
 }
 
-pub fn notify_all() -> Result<()> {
-    notify_all_where(allowed)
+/// What a notification says. Encrypted for each phone (see webpush.rs), so
+/// the push service carries it without being able to read it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Notice {
+    pub title: String,
+    pub body: String,
+    /// Opened when it's tapped; none opens the "Needs you" overview.
+    pub session_id: Option<String>,
+    /// A newer notice with the same tag replaces the older one on the phone.
+    pub tag: String,
+}
+
+pub fn notify_all(notice: &Notice) -> Result<()> {
+    notify_all_where(notice, allowed)
 }
 
 /// `allow` decides which endpoints may be contacted (tests point it at a stand-in).
-pub fn notify_all_where(allow: impl Fn(&str) -> bool) -> Result<()> {
-    let subs = select_rows("push_subscriptions", "select=id,endpoint")?;
+pub fn notify_all_where(notice: &Notice, allow: impl Fn(&str) -> bool) -> Result<()> {
+    let subs = select_rows("push_subscriptions", "select=id,endpoint,p256dh,auth")?;
     if subs.is_empty() {
         return Ok(());
     }
     let key = signing_key()?;
     let public = public_key()?;
     let who = contact()?;
+    let message = json!({ "title": notice.title, "body": notice.body, "sessionId": notice.session_id, "tag": notice.tag }).to_string();
     for sub in subs {
         let endpoint = sub["endpoint"].as_str().unwrap_or("");
         if !allow(endpoint) {
             log(format!("push: skipping endpoint that isn't a known push service: {}", host_of(endpoint)));
             continue;
         }
-        let status = send(endpoint, &key, &public, &who);
+        // Phones that subscribed before keys were kept get the empty, generic push.
+        let body = match (sub["p256dh"].as_str(), sub["auth"].as_str()) {
+            (Some(p), Some(a)) => match crate::webpush::encrypt(message.as_bytes(), p, a) {
+                Ok(b) => Some(b),
+                Err(e) => {
+                    log(format!("push: can't encrypt for {}: {e}", host_of(endpoint)));
+                    None
+                }
+            },
+            _ => None,
+        };
+        let status = send(endpoint, &key, &public, &who, body.as_deref());
         if status == 404 || status == 410 {
             // The phone unsubscribed or the browser dropped it.
             api("DELETE", &format!("/rest/v1/push_subscriptions?id=eq.{}", sub["id"]), None, Some("return=minimal"))?;
@@ -171,11 +199,57 @@ pub fn notify_all_where(allow: impl Fn(&str) -> bool) -> Result<()> {
     Ok(())
 }
 
-/// Remembers each session's status and pushes when one changes in a way that matters.
+/// A turn at least this long counts as a long task: worth a buzz when it ends.
+const LONG_TASK_SECS: u64 = 180;
+/// Limits worth a warning, in percent used.
+const USAGE_ALERTS: [i64; 2] = [80, 95];
+
+fn title(row: &Value) -> String {
+    row["name"].as_str().filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| {
+        let cwd = row["cwd"].as_str().unwrap_or("");
+        cwd.rsplit('/').find(|p| !p.is_empty()).unwrap_or(cwd).to_string()
+    })
+}
+
+/// "3:10 PM" today, else "Mon 3:10 PM".
+fn reset_time(epoch: i64) -> String {
+    use chrono::{Local, TimeZone};
+    let Some(at) = Local.timestamp_opt(epoch, 0).single() else { return String::new() };
+    if at.date_naive() == Local::now().date_naive() { at.format("%-I:%M %p").to_string() } else { at.format("%a %-I:%M %p").to_string() }
+}
+
+/// What changed between two looks at one session that's worth telling a phone.
+/// `worked` is how long it had been working, if it just stopped.
+pub fn session_notice(row: &Value, was: &str, now: &str, worked: Option<u64>) -> Option<Notice> {
+    let notify = row["notify"].as_str().unwrap_or("needs-you");
+    if notify == "off" || row["paused_at"].is_string() {
+        return None;
+    }
+    let id = row["id"].as_str()?.to_string();
+    let name = title(row);
+    if now == "waiting" && matches!(was, "working" | "idle" | "starting") {
+        return Some(Notice { title: format!("{name} needs you"), body: "Claude is asking you something.".into(), session_id: Some(id.clone()), tag: id });
+    }
+    if was == "working" && now == "idle" {
+        let secs = worked.unwrap_or(0);
+        if notify == "all" || secs >= LONG_TASK_SECS {
+            let took = if secs >= 60 { format!(" after {} min", secs / 60) } else { String::new() };
+            return Some(Notice { title: format!("{name} is done"), body: format!("Claude finished{took}."), session_id: Some(id.clone()), tag: id });
+        }
+    }
+    None
+}
+
+/// Remembers each session's status and pushes when one changes in a way
+/// that matters to it (see `session_notice`), and when a plan limit runs high.
 #[derive(Default)]
 pub struct Watcher {
     statuses: Option<HashMap<String, String>>,
-    last_push: Option<Instant>,
+    working_since: HashMap<String, Instant>,
+    last_push: HashMap<String, Instant>,
+    /// Usage alerts this controller already recorded, so it doesn't ask the
+    /// database again every few seconds while a limit stays high.
+    alerted: std::collections::HashSet<String>,
 }
 
 impl Watcher {
@@ -183,28 +257,67 @@ impl Watcher {
         self.check_with(machine, notify_all)
     }
 
-    pub fn check_with(&mut self, machine: &str, notify: impl FnOnce() -> Result<()>) -> Result<()> {
+    pub fn check_with(&mut self, machine: &str, mut notify: impl FnMut(&Notice) -> Result<()>) -> Result<()> {
         // Each computer pushes for its own sessions, so a phone isn't told twice.
-        let rows = select_rows("sessions", &format!("status=neq.ended&hostname=eq.{}&select=id,status", quote(machine)))?;
-        let current: HashMap<String, String> = rows
-            .iter()
-            .filter_map(|r| Some((r["id"].as_str()?.to_string(), r["status"].as_str()?.to_string())))
-            .collect();
-        if let Some(before) = &self.statuses {
-            let changed = current.iter().any(|(id, now)| {
-                let was = before.get(id).map(String::as_str).unwrap_or("");
-                NOTEWORTHY.contains(&(was, now.as_str()))
-            });
-            // One buzz covers several sessions changing at once.
-            let quiet = self.last_push.is_none_or(|t| t.elapsed().as_secs() > 20);
-            if changed && quiet {
-                self.last_push = Some(Instant::now());
-                notify()?;
+        let rows = select_rows("sessions", &format!("status=neq.ended&hostname=eq.{}&select=id,status,name,cwd,notify,paused_at,usage", quote(machine)))?;
+        let mut notices = Vec::new();
+        let mut current = HashMap::new();
+        for row in &rows {
+            let (Some(id), Some(now)) = (row["id"].as_str(), row["status"].as_str()) else { continue };
+            current.insert(id.to_string(), now.to_string());
+            let was = self.statuses.as_ref().and_then(|b| b.get(id)).map(String::as_str);
+            if now == "working" && was != Some("working") {
+                self.working_since.insert(id.to_string(), Instant::now());
             }
+            let worked = (now != "working").then(|| self.working_since.remove(id)).flatten().map(|t| t.elapsed().as_secs());
+            if let Some(n) = was.and_then(|was| session_notice(row, was, now, worked)) {
+                notices.push(n);
+            }
+            notices.extend(usage_notices(row, &mut self.alerted)?);
+        }
+        for n in notices {
+            // At most one buzz per session (or alert) every 20 seconds.
+            if self.last_push.get(&n.tag).is_some_and(|t| t.elapsed().as_secs() < 20) {
+                continue;
+            }
+            self.last_push.insert(n.tag.clone(), Instant::now());
+            notify(&n)?;
         }
         self.statuses = Some(current);
         Ok(())
     }
+}
+
+/// A warning when the 5-hour or weekly limit passes 80% and 95%, sent once
+/// per window across all computers (the sent_alerts table remembers).
+fn usage_notices(row: &Value, alerted: &mut std::collections::HashSet<String>) -> Result<Vec<Notice>> {
+    let mut out = Vec::new();
+    for (field, label) in [("five_hour", "5-hour"), ("seven_day", "Weekly")] {
+        let window = &row["usage"][field];
+        let (Some(pct), Some(resets)) = (window["used_percentage"].as_i64(), window["resets_at"].as_i64()) else { continue };
+        let Some(level) = USAGE_ALERTS.iter().rev().find(|l| pct >= **l) else { continue };
+        let key = format!("{field}:{resets}:{level}");
+        if !alerted.insert(key.clone()) {
+            continue;
+        }
+        let fresh = crate::supa::insert("sent_alerts", &json!([{ "key": key }]), "resolution=ignore-duplicates,return=representation")?;
+        if fresh.as_array().is_some_and(|a| !a.is_empty()) {
+            out.push(Notice {
+                title: format!("{label} limit at {pct}%"),
+                body: format!("Resets {}.", reset_time(resets)),
+                session_id: None,
+                tag: format!("usage-{field}"),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Forget alerts older than two weeks; their windows are long over.
+pub fn prune_alerts(_: &str) -> Result<()> {
+    let cutoff = (chrono::Utc::now() - chrono::Duration::days(14)).format("%Y-%m-%dT%H:%M:%SZ");
+    api("DELETE", &format!("/rest/v1/sent_alerts?created_at=lt.{cutoff}"), None, Some("return=minimal"))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -221,6 +334,25 @@ mod tests {
         VerifyingKey::from(&key).verify(input.as_bytes(), &sig).unwrap();
         let claims: serde_json::Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(input.split('.').nth(1).unwrap()).unwrap()).unwrap();
         assert_eq!(claims["aud"], "https://fcm.googleapis.com");
+    }
+
+    #[test]
+    fn notices_follow_each_sessions_setting() {
+        let row = |notify: &str| json!({ "id": "s1", "name": "landing page", "cwd": "/x/site", "notify": notify });
+        let needs = session_notice(&row("needs-you"), "working", "waiting", None).unwrap();
+        assert_eq!(needs.title, "landing page needs you");
+        assert_eq!(needs.session_id.as_deref(), Some("s1"));
+        // A short turn ending is quiet by default; a long one, or "all", isn't.
+        assert_eq!(session_notice(&row("needs-you"), "working", "idle", Some(30)), None);
+        assert_eq!(session_notice(&row("needs-you"), "working", "idle", Some(600)).unwrap().title, "landing page is done");
+        assert!(session_notice(&row("all"), "working", "idle", Some(5)).is_some());
+        // Off is off; and a paused session doesn't buzz.
+        assert_eq!(session_notice(&row("off"), "working", "waiting", None), None);
+        let mut paused = row("all");
+        paused["paused_at"] = json!("2026-10-21T10:00:00Z");
+        assert_eq!(session_notice(&paused, "working", "idle", Some(600)), None);
+        // Unnamed sessions go by their folder.
+        assert_eq!(session_notice(&json!({ "id": "s2", "cwd": "/x/site" }), "idle", "waiting", None).unwrap().title, "site needs you");
     }
 
     #[test]
@@ -241,6 +373,37 @@ mod tests {
         let pem = String::from_utf8(out.stdout).unwrap();
         let key = SecretKey::from_sec1_pem(&pem).unwrap();
         assert_eq!(SigningKey::from(key).verifying_key().to_encoded_point(false).len(), 65);
+    }
+
+    /// Needs the local Supabase: `cargo test -- --ignored`.
+    #[test]
+    #[ignore]
+    fn a_usage_alert_goes_out_once_across_computers() {
+        let resets = chrono::Utc::now().timestamp() + 3600;
+        let usage = json!({ "context_percentage": 10, "five_hour": { "used_percentage": 83, "resets_at": resets }, "seven_day": { "used_percentage": 40, "resets_at": resets } });
+        let mut ids = Vec::new();
+        for host in ["alert-box-a", "alert-box-b"] {
+            let row = crate::supa::insert("sessions", &json!({ "cwd": "/tmp/alert", "status": "idle", "hostname": host, "usage": usage }), "return=representation").unwrap();
+            ids.push(row[0]["id"].as_str().unwrap().to_string());
+        }
+        let mut sent = Vec::new();
+        for host in ["alert-box-a", "alert-box-b"] {
+            let mut w = Watcher::default();
+            for _ in 0..2 {
+                w.check_with(host, |n| {
+                    sent.push(n.clone());
+                    Ok(())
+                })
+                .unwrap();
+            }
+        }
+        for id in &ids {
+            let _ = api("DELETE", &format!("/rest/v1/sessions?id=eq.{id}"), None, Some("return=minimal"));
+        }
+        let _ = api("DELETE", &format!("/rest/v1/sent_alerts?key=like.five_hour:{resets}:*"), None, Some("return=minimal"));
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert_eq!(sent[0].title, "5-hour limit at 83%");
+        assert!(sent[0].session_id.is_none());
     }
 
     /// Needs the local Supabase: `cargo test -- --ignored`.
@@ -290,9 +453,9 @@ mod tests {
         let sid = session[0]["id"].as_str().unwrap().to_string();
         let allow = |e: &str| e.starts_with(&base);
         let mut w = Watcher::default();
-        w.check_with("push-test-box", || notify_all_where(allow)).unwrap();
+        w.check_with("push-test-box", |n| notify_all_where(n, allow)).unwrap();
         crate::supa::update("sessions", &format!("id=eq.{sid}"), &json!({ "status": "waiting" })).unwrap();
-        w.check_with("push-test-box", || notify_all_where(allow)).unwrap();
+        w.check_with("push-test-box", |n| notify_all_where(n, allow)).unwrap();
         let left = select_rows("push_subscriptions", &format!("user_id=eq.{uid}&select=endpoint")).unwrap();
         let _ = api("DELETE", &format!("/rest/v1/sessions?id=eq.{sid}"), None, Some("return=minimal"));
         cleanup();

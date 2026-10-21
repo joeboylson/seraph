@@ -15,7 +15,12 @@ export async function subscribePush(): Promise<boolean> {
     const subscription =
       (await registration.pushManager.getSubscription()) ??
       (await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(settings.vapidPublicKey!) }))
-    const { error } = await db.from("push_subscriptions").upsert({ endpoint: subscription.endpoint }, { onConflict: "endpoint", ignoreDuplicates: true })
+    // Its keys let the controller encrypt what a notification says for this
+    // device only. Saved again each visit, so devices from before get them too.
+    const keys = subscription.toJSON().keys ?? {}
+    const { error } = await db
+      .from("push_subscriptions")
+      .upsert({ endpoint: subscription.endpoint, p256dh: keys.p256dh ?? null, auth: keys.auth ?? null }, { onConflict: "endpoint" })
     return !error
   } catch {
     return false // e.g. iPhone outside an installed home-screen app

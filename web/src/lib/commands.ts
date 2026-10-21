@@ -1,5 +1,5 @@
 import { db } from "./supabase"
-import type { Command } from "./types"
+import type { Command, Notify } from "./types"
 
 const listeners = new Set<(message: string) => void>()
 
@@ -58,6 +58,12 @@ function report(action: string, error: { message: string } | null) {
 export async function renameSession(sessionId: string, name: string) {
   const { error } = await db.from("sessions").update({ name: name.trim() || null }).eq("id", sessionId)
   report("rename the session", error)
+}
+
+/** Choose what a session pushes to phones about. */
+export async function setNotify(sessionId: string, notify: Notify) {
+  const { error } = await db.from("sessions").update({ notify }).eq("id", sessionId)
+  report("change notifications", error)
 }
 
 /** Pause a session: mark it, then stop its Claude. Resuming clears the mark. */
