@@ -1,4 +1,4 @@
-import { DownloadIcon, PlusIcon, RefreshCwIcon, TriangleAlertIcon } from "lucide-react"
+import { DownloadIcon, PencilIcon, PlusIcon, RefreshCwIcon, TriangleAlertIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -6,9 +6,13 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { FieldDescription } from "@/components/ui/field"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { Toggle } from "@/components/ui/toggle"
 import { olderThan, useDeviceLogs, useLatestRelease, type Device } from "@/hooks/data"
-import { askDaemon } from "@/lib/commands"
+import { askDaemon, renameDevice, setAutoUpdate } from "@/lib/commands"
 import type { Session } from "@/lib/types"
 import { timeAgo } from "@/lib/utils"
 import { FolderTree } from "./FolderTree"
@@ -76,18 +80,32 @@ export function DeviceView({
     <div className="flex min-h-0 flex-1 flex-col gap-s5 overflow-y-auto pb-s6" data-testid="device-view">
       <header className="flex flex-col gap-s2 border-b pb-s4">
         <div className="flex flex-wrap items-center gap-s4">
-          <h1 className="text-title font-medium tracking-[-0.03em]" data-testid="device-title">{device.id}</h1>
+          <h1 className="text-title font-medium tracking-[-0.03em]" data-testid="device-title">{device.label || device.id}</h1>
+          <RenameDevice device={device} />
           <Badge variant="outline" className="label gap-s2 normal-case" data-testid="device-status" data-active={device.active}>
             <span className={`size-2 rounded-full ${device.active ? "bg-success" : "bg-muted-foreground/50"}`} aria-hidden />
             {device.active ? "Active" : "Inactive"}
           </Badge>
         </div>
+        {device.label && <p className="font-mono text-sm text-muted-foreground" data-testid="device-hostname">{device.id}</p>}
         <p className="label">
           {device.stopped_at ? `Stopped ${timeAgo(device.stopped_at)}` : `Checked in ${timeAgo(device.last_seen)}`}
           {device.version && ` · seraph ${device.version.split(" ")[0]}`}
           {` · ${running.length} running`}
         </p>
       </header>
+
+      <div className="flex items-center gap-s3">
+        <Switch
+          id="auto-update"
+          checked={Boolean(device.auto_update)}
+          onCheckedChange={(on) => setAutoUpdate(device.id, on).catch(() => {})}
+          data-testid="auto-update"
+        />
+        <Label htmlFor="auto-update" className="text-sm font-normal">
+          Install new releases by itself <span className="text-muted-foreground">(checks every hour; sessions keep running)</span>
+        </Label>
+      </div>
 
       {warnings.length > 0 && (
         <Alert data-testid="device-warnings">
@@ -201,5 +219,45 @@ function DeviceLogs({ machine }: { machine: string }) {
         )}
       </div>
     </section>
+  )
+}
+
+/** Give the computer a name for the page; its hostname stays underneath. */
+function RenameDevice({ device }: { device: Device }) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState("")
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (o) setName(device.label ?? "")
+        setOpen(o)
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon-sm" className="-ml-s3 text-muted-foreground" aria-label="Rename device" title="Rename" data-testid="rename-device">
+          <PencilIcon />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-[377px]">
+        <form
+          className="flex flex-col gap-s4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            renameDevice(device.id, name).catch(() => {})
+            setOpen(false)
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Name {device.id}</DialogTitle>
+          </DialogHeader>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={device.id} autoFocus aria-label="Device name" data-testid="device-name-input" />
+          <p className="text-sm text-muted-foreground">Leave it empty to go back to {device.id}.</p>
+          <DialogFooter>
+            <Button type="submit" className="rounded-full" data-testid="device-name-save">Save</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }

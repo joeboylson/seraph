@@ -128,7 +128,7 @@ export function NewSessionDialog({
               <FieldLabel htmlFor="f-computer" className="label">Computer</FieldLabel>
               <Select value={machine?.id} onValueChange={setChosen}>
                 <SelectTrigger id="f-computer" className="w-full" data-testid="machine"><SelectValue /></SelectTrigger>
-                <SelectContent>{machines.map((m) => <SelectItem key={m.id} value={m.id}>{m.id}</SelectItem>)}</SelectContent>
+                <SelectContent>{machines.map((m) => <SelectItem key={m.id} value={m.id}>{m.label || m.id}</SelectItem>)}</SelectContent>
               </Select>
             </Field>
           )}

@@ -193,6 +193,38 @@ fn update_seraph() -> Result<Value> {
     Ok(json!({ "updating": true, "from": crate::VERSION }))
 }
 
+/// "0.2.7" or "v0.2.7 (built …)" to [0, 2, 7].
+fn version_parts(v: &str) -> Vec<u64> {
+    v.trim_start_matches('v').split_whitespace().next().unwrap_or("").split('.').map(|n| n.parse().unwrap_or(0)).collect()
+}
+
+/// The newest published release's tag, e.g. "v0.2.8".
+fn latest_release() -> Result<String> {
+    let body: Value = crate::supa::agent(15)
+        .get("https://api.github.com/repos/joeboylson/seraph/releases/latest")
+        .set("User-Agent", "seraph")
+        .set("Accept", "application/vnd.github+json")
+        .call()?
+        .into_json()?;
+    body["tag_name"].as_str().map(str::to_string).ok_or_else(|| anyhow!("no tag_name in GitHub's answer"))
+}
+
+/// With auto-update on for this computer (its device screen), install a
+/// newer release when one is out. Never goes back to an older one, e.g. on
+/// a computer running a build from the repo.
+fn auto_update(controller_id: &str) -> Result<()> {
+    let rows = select_rows("controllers", &format!("id=eq.{}&select=auto_update", quote(controller_id)))?;
+    if rows.first().and_then(|r| r["auto_update"].as_bool()) != Some(true) {
+        return Ok(());
+    }
+    let latest = latest_release()?;
+    if version_parts(&latest) > version_parts(env!("CARGO_PKG_VERSION")) {
+        log(format!("auto-update: {latest} is out; updating from {}", crate::VERSION));
+        update_seraph()?;
+    }
+    Ok(())
+}
+
 /// Restart a session started from the page: end its Claude, wait for it to
 /// exit, then start Claude again in the same session, resuming the same
 /// conversation. The session keeps its id, so the page stays on it.
@@ -536,7 +568,7 @@ pub fn cmd_daemon() -> Result<i32> {
     log(format!("daemon: started, seraph {} as {controller_id}", crate::VERSION));
 
     let (mut last_beat, mut last_purge, mut last_watch) = (None, None, None);
-    let (mut last_ship, mut last_prune, mut last_dead_check) = (None, None, None);
+    let (mut last_ship, mut last_prune, mut last_dead_check, mut last_auto_update) = (None, None, None, None);
     let mut watcher = push::Watcher::default();
     let mut last_turn = Instant::now();
     while !stop.load(Ordering::Relaxed) {
@@ -557,6 +589,9 @@ pub fn cmd_daemon() -> Result<i32> {
         }
         if every(&mut last_ship, 60) {
             run_steps(&controller_id, &[("ship_logs", crate::logship::ship)]);
+        }
+        if every(&mut last_auto_update, 3600) {
+            run_steps(&controller_id, &[("auto_update", auto_update)]);
         }
         if every(&mut last_prune, 3600) {
             run_steps(&controller_id, &[("prune_logs", crate::logship::prune), ("prune_alerts", push::prune_alerts)]);
@@ -589,4 +624,17 @@ pub fn cmd_daemon() -> Result<i32> {
     }
     let _ = fs::remove_file(config::pid_path());
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn versions_compare_by_number() {
+        assert!(version_parts("v0.2.10") > version_parts("0.2.9 (built 2026-10-21 03:14 UTC)"));
+        assert!(version_parts("v0.3.0") > version_parts("0.2.7"));
+        assert_eq!(version_parts("v0.2.7"), version_parts("0.2.7 (built x)"));
+        assert!(version_parts("v0.2.6") < version_parts("0.2.7"));
+    }
 }

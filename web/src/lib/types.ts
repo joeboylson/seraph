@@ -101,6 +101,10 @@ export type Controller = {
   /** Set when it stopped cleanly; empty while it runs. */
   stopped_at?: string | null
   version?: string | null
+  /** A name chosen on the page, e.g. "Atlas Mac"; the id stays the hostname. */
+  label?: string | null
+  /** Whether its controller installs new releases by itself. */
+  auto_update?: boolean
   /** What it reports about its computer on each check-in. */
   info?: { folders?: string[]; at_login?: boolean; platform?: string } | null
 }

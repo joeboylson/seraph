@@ -1,9 +1,9 @@
 import { BellRingIcon } from "lucide-react"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item"
-import { useLastReplies } from "@/hooks/data"
+import { deviceName, useLastReplies } from "@/hooks/data"
 import { speakable } from "@/hooks/useVoice"
-import type { MessageRow, Session } from "@/lib/types"
+import type { Controller, MessageRow, Session } from "@/lib/types"
 import { cn, timeAgo } from "@/lib/utils"
 import { sessionTitle } from "./SessionList"
 import { StatusBadge, shownStatus } from "./StatusBadge"
@@ -19,7 +19,7 @@ function replyText(m: MessageRow | undefined) {
 }
 
 /** Every running session on every computer, the ones waiting on you first. */
-export function Overview({ sessions, onOpen }: { sessions: Session[]; onOpen: (id: string) => void }) {
+export function Overview({ sessions, devices, onOpen }: { sessions: Session[]; devices: Controller[]; onOpen: (id: string) => void }) {
   const live = sessions
     .filter((s) => s.status !== "ended" || s.paused_at)
     .sort((a, b) => ORDER[shownStatus(a)] - ORDER[shownStatus(b)] || b.updated_at.localeCompare(a.updated_at))
@@ -51,7 +51,7 @@ export function Overview({ sessions, onOpen }: { sessions: Session[]; onOpen: (i
                     <ItemTitle className="flex items-center gap-s2">
                       {status === "waiting" && <BellRingIcon className="size-4 text-highlight" />}
                       <span className="truncate">{sessionTitle(s)}</span>
-                      <span className="label normal-case">{s.hostname ?? "unknown computer"}</span>
+                      <span className="label normal-case">{deviceName(s.hostname, devices)}</span>
                     </ItemTitle>
                     <ItemDescription className="line-clamp-2" data-testid="overview-reply">
                       {reply || "No reply yet."}

@@ -57,6 +57,12 @@ export function useDevices(): Device[] {
   )
 }
 
+/** What to call a computer: its chosen name, else its hostname. */
+export function deviceName(id: string | null | undefined, devices: Controller[]) {
+  if (!id) return "Unknown computer"
+  return devices.find((d) => d.id === id)?.label || id
+}
+
 /** The active computers: the ones the page can start and resume sessions on. */
 export function useMachines(): Device[] {
   const devices = useDevices()

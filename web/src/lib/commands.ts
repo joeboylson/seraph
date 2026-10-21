@@ -60,6 +60,18 @@ export async function renameSession(sessionId: string, name: string) {
   report("rename the session", error)
 }
 
+/** Name a computer on the page; empty goes back to its hostname. */
+export async function renameDevice(id: string, label: string) {
+  const { error } = await db.from("controllers").update({ label: label.trim() || null }).eq("id", id)
+  report("rename the device", error)
+}
+
+/** Let a computer install new releases by itself, or stop it. */
+export async function setAutoUpdate(id: string, on: boolean) {
+  const { error } = await db.from("controllers").update({ auto_update: on }).eq("id", id)
+  report("change auto-update", error)
+}
+
 /** Choose what a session pushes to phones about. */
 export async function setNotify(sessionId: string, notify: Notify) {
   const { error } = await db.from("sessions").update({ notify }).eq("id", sessionId)

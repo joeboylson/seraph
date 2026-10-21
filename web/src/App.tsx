@@ -13,7 +13,7 @@ import { Overview } from "@/components/Overview"
 import { PinnedTabs } from "@/components/PinnedTabs"
 import { SessionList } from "@/components/SessionList"
 import { SessionView } from "@/components/SessionView"
-import { useConnected, useDevices, useSessions } from "@/hooks/data"
+import { deviceName, useConnected, useDevices, useSessions } from "@/hooks/data"
 import { useNotifications } from "@/hooks/useNotifications"
 import { MAX_PINS, usePins } from "@/hooks/usePins"
 import { onCommandError } from "@/lib/commands"
@@ -154,6 +154,7 @@ export default function App() {
               canPin={pins.length < MAX_PINS}
               onTogglePin={() => togglePin(selected.id)}
               hostOnline={!!selected.hostname && machines.some((m) => m.id === selected.hostname)}
+              hostName={deviceName(selected.hostname, devices)}
             />
           ) : selectedId || loading ? (
             <Empty>
@@ -163,7 +164,7 @@ export default function App() {
               </EmptyHeader>
             </Empty>
           ) : (
-            <Overview sessions={sessions} onOpen={select} />
+            <Overview sessions={sessions} devices={devices} onOpen={select} />
           )}
         </div>
       </SidebarInset>

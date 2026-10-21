@@ -16,7 +16,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { cn, timeAgo } from "@/lib/utils"
-import type { Device } from "@/hooks/data"
+import { deviceName, type Device } from "@/hooks/data"
 import type { Session } from "@/lib/types"
 import { StatusBadge, shownStatus } from "./StatusBadge"
 
@@ -129,7 +129,7 @@ export function SessionList({
                         <SidebarMenuItem key={d}>
                           <SidebarMenuButton onClick={() => open(d)} isActive={openDevice === d} data-testid="device-item">
                             <OnlineDot online={online.includes(d)} />
-                            <span className="min-w-0 flex-1 truncate">{d}</span>
+                            <span className="min-w-0 flex-1 truncate">{deviceName(d, known)}</span>
                             {online.includes(d) ? (
                               running > 0 && <span className="label shrink-0 normal-case">{running} running</span>
                             ) : (
@@ -149,7 +149,7 @@ export function SessionList({
           ) : (
             <DeviceSessions
               key={device}
-              device={device}
+              name={deviceName(device, known)}
               online={online.includes(device)}
               sessions={sessions.filter((s) => deviceOf(s) === device)}
               selectedId={selectedId}
@@ -168,7 +168,7 @@ export function SessionList({
 }
 
 function DeviceSessions({
-  device,
+  name,
   online,
   sessions,
   selectedId,
@@ -176,7 +176,8 @@ function DeviceSessions({
   onBack,
   onOpenDevice,
 }: {
-  device: string
+  /** What to call it: its chosen name, else its hostname. */
+  name: string
   online: boolean
   sessions: Session[]
   selectedId: string | null
@@ -219,9 +220,9 @@ function DeviceSessions({
           <ChevronLeftIcon /> Devices
         </Button>
         {/* Opens the device's screen: its status and folders. */}
-        <button type="button" onClick={onOpenDevice} className="flex items-center gap-s2 rounded-md px-s3 py-s1 text-left text-sm font-medium hover:bg-sidebar-accent" data-testid="device-name" title={`${device}: status and folders`}>
+        <button type="button" onClick={onOpenDevice} className="flex items-center gap-s2 rounded-md px-s3 py-s1 text-left text-sm font-medium hover:bg-sidebar-accent" data-testid="device-name" title={`${name}: status and folders`}>
           <OnlineDot online={online} />
-          <span className="truncate">{device}</span>
+          <span className="truncate">{name}</span>
         </button>
         {sessions.length > 8 && (
           <SidebarInput type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a session" aria-label="Find a session" data-testid="session-search" />

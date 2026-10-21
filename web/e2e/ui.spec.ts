@@ -933,3 +933,28 @@ test("a device screen warns about its setup, offers an update, and shows its log
     await db.from("controllers").delete().eq("id", "stale-box")
   }
 })
+
+test("a device can be named, and its auto-update switched on", async ({ page }) => {
+  await db.from("controllers").upsert({ id: "named-box", hostname: "named-box", home: "/home/n", last_seen: new Date().toISOString() })
+  const s = await fakeSession({ name: "on named box", hostname: "named-box", status: "waiting" })
+  try {
+    await page.goto(`/#/d/named-box`)
+    await page.getByTestId("rename-device").click()
+    await page.getByTestId("device-name-input").fill("Spark Box")
+    await page.getByTestId("device-name-save").click()
+    await expect(page.getByTestId("device-title")).toHaveText("Spark Box")
+    await expect(page.getByTestId("device-hostname")).toHaveText("named-box")
+    // The name shows wherever the device does.
+    await expect(page.getByRole("navigation", { name: "Sessions" }).getByTestId("device-name")).toContainText("Spark Box")
+    await page.getByTestId("overview-link").click()
+    await expect(page.getByTestId("overview-session").filter({ hasText: "on named box" })).toContainText("Spark Box")
+
+    await page.goto(`/#/d/named-box`)
+    await expect(page.getByTestId("auto-update")).toHaveAttribute("data-state", "unchecked")
+    await page.getByTestId("auto-update").click()
+    await expect.poll(async () => (await db.from("controllers").select("auto_update").eq("id", "named-box").single()).data?.auto_update).toBe(true)
+  } finally {
+    await removeSession(s.id)
+    await db.from("controllers").delete().eq("id", "named-box")
+  }
+})

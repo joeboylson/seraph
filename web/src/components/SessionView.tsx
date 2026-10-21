@@ -244,6 +244,7 @@ export function SessionView({
   canPin,
   onTogglePin,
   hostOnline,
+  hostName,
 }: {
   session: Session
   onOpen: (id: string) => void
@@ -253,6 +254,8 @@ export function SessionView({
   onTogglePin: () => void
   /** Whether the computer the session runs on has its controller running. */
   hostOnline: boolean
+  /** What to call that computer: its chosen name, else its hostname. */
+  hostName: string
 }) {
   const ended = session.status === "ended"
   // Paused: Claude is stopped (or stopping) but the session waits to be resumed.
@@ -332,7 +335,7 @@ export function SessionView({
   const readAloud = useReadAloud(messages)
   const context = useMemo(() => contextTokens(messages), [messages])
   const changes = useMemo(() => fileChanges(messages), [messages])
-  const origin = session.mode === "headless" ? "Started from web" : linked ? "Linked, read-only" : `Terminal on ${session.hostname ?? "this Mac"}`
+  const origin = session.mode === "headless" ? "Started from web" : linked ? "Linked, read-only" : `Terminal on ${hostName}`
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -439,7 +442,7 @@ export function SessionView({
                 className="rounded-full"
                 onClick={resume}
                 disabled={resuming || !hostOnline}
-                title={hostOnline ? undefined : `${session.hostname ?? "Its computer"} is offline`}
+                title={hostOnline ? undefined : `${hostName} is offline`}
                 data-testid="resume"
               >
                 <RotateCcwIcon /> {resuming ? "Resuming…" : "Resume"}
@@ -480,7 +483,7 @@ export function SessionView({
           <Alert data-testid="host-offline">
             <AlertDescription>
               <span>
-                {session.hostname ?? "The computer it ran on"} is offline. Its conversation lives there, so it resumes there: run{" "}
+                {hostName} is offline. Its conversation lives there, so it resumes there: run{" "}
                 <code className="font-mono">seraph start</code> on it, and Resume works from any device.
               </span>
             </AlertDescription>
